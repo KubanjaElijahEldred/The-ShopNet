@@ -128,7 +128,28 @@ function createId(prefix: string) {
 }
 
 const initialStore = {
-  users: [] as DemoUser[],
+  users: [
+    {
+      id: createId("usr"),
+      name: "Demo User",
+      email: "demo@example.com",
+      passwordHash: "$2a$10$1n.5M3IkooAb22ccsgLXZecKit./jBv6Ud3N3Gu0dDfrfeBD/gnTS",
+      location: "Kampala, Uganda",
+      mobileNumber: "+256700000000",
+      profileImage: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=150&h=150&q=80",
+      shippingAddress: "123 Demo Street, Kampala"
+    },
+    {
+      id: createId("usr"),
+      name: "Test Seller",
+      email: "seller@example.com",
+      passwordHash: "$2a$10$xuLdwo3x9smaL21r6F47oeTOUBXRs0YfH7lekNMEREESNHko.Hsvm",
+      location: "Nairobi, Kenya",
+      mobileNumber: "+254700000000",
+      profileImage: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80",
+      shippingAddress: "456 Test Avenue, Nairobi"
+    }
+  ] as DemoUser[],
   products: [
     {
       id: createId("prd"),
