@@ -1,6 +1,6 @@
 # ShopNet
 
-ShopNet is a Next.js ecommerce web app scaffold with:
+ShopNet is a Next.js ecommerce web app scaffold with
 
 - account creation and login
 - strong password validation with confirmation
