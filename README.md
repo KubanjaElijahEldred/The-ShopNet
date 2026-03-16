@@ -1,4 +1,4 @@
-# ShopNet
+# ShopNet:
 
 ShopNet is a Next.js ecommerce web app scaffold with:
 
