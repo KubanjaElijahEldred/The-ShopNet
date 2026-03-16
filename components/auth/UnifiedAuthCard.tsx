@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { SignIn, SignUp, useSignIn, useSignUp } from "@clerk/nextjs";
+import { SignIn, SignUp } from "@clerk/nextjs";
+import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 
 type Mode = "signin" | "signup";
 
@@ -84,7 +85,7 @@ export function UnifiedAuthCard({ initialMode = "signin" }: { initialMode?: Mode
         <div className="auth-clerk-card">
           {mode === "signin" ? (
             <SignIn
-              routing="virtual"
+              routing="hash"
               forceRedirectUrl="/"
               appearance={{
                 elements: {
@@ -97,7 +98,7 @@ export function UnifiedAuthCard({ initialMode = "signin" }: { initialMode?: Mode
             />
           ) : (
             <SignUp
-              routing="virtual"
+              routing="hash"
               forceRedirectUrl="/"
               appearance={{
                 elements: {
