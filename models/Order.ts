@@ -16,6 +16,7 @@ const OrderSchema = new Schema(
   {
     userId: { type: String, required: true },
     userName: { type: String, required: true },
+    userEmail: { type: String },
     location: { type: String, required: true },
     paymentMethod: { type: String, required: true },
     status: { type: String, required: true, default: "Pending" },

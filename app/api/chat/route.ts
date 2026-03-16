@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import {
   createChatMessage,
+  getChatConversationContext,
   getChatMessagesForGuest,
   getChatMessagesForUser,
-  getProducts
+  getProductById
 } from "@/lib/data";
 import { getSessionUser } from "@/lib/session";
+import { getSafeRequestUrl } from "@/lib/url";
 import { chatSchema } from "@/lib/validators";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams } = getSafeRequestUrl(request, "/api/chat");
   const email = searchParams.get("email") || undefined;
   const user = await getSessionUser();
   const messages = user
@@ -23,25 +26,48 @@ export async function POST(request: Request) {
     const payload = await request.json();
     const data = chatSchema.parse(payload);
     const user = await getSessionUser();
-    const products = await getProducts();
-    const productOwnerId =
-      data.productId &&
-      products.find((product) => product.id === data.productId)?.ownerId;
+    const existingConversation = data.conversationId
+      ? await getChatConversationContext(data.conversationId)
+      : null;
+    const resolvedProductId = data.productId || existingConversation?.productId;
 
     if (user) {
-      const ownerId = data.recipientId || productOwnerId || user.id;
-      const participantId = ownerId === user.id ? undefined : user.id;
+      let ownerId = existingConversation?.ownerId || data.recipientId;
+
+      if (!ownerId && resolvedProductId) {
+        const product = await getProductById(resolvedProductId);
+        ownerId = product?.ownerId;
+      }
+
+      ownerId ||= user.id;
+
+      let participantId = existingConversation?.participantId;
+
+      if (!participantId) {
+        if (data.recipientId && data.recipientId !== ownerId) {
+          participantId = data.recipientId;
+        } else if (user.id !== ownerId) {
+          participantId = user.id;
+        }
+      }
+
+      if (participantId === ownerId) {
+        participantId = undefined;
+      }
 
       const message = await createChatMessage({
         conversationId: data.conversationId,
         ownerId,
         participantId,
-        participantEmail: data.participantEmail || undefined,
+        participantEmail:
+          data.participantEmail ||
+          existingConversation?.participantEmail ||
+          undefined,
         senderId: user.id,
         senderName: user.name,
         senderEmail: user.email,
         senderProfileImage: user.profileImage,
-        productId: data.productId,
+        productId: resolvedProductId,
         message: data.message,
         location:
           data.latitude !== undefined && data.longitude !== undefined
@@ -64,14 +90,25 @@ export async function POST(request: Request) {
       );
     }
 
+    let ownerId = existingConversation?.ownerId;
+
+    if (!ownerId && resolvedProductId) {
+      const product = await getProductById(resolvedProductId);
+      ownerId = product?.ownerId;
+    }
+
     const message = await createChatMessage({
       conversationId: data.conversationId,
-      ownerId: productOwnerId || "demo_seller",
-      participantEmail: data.participantEmail || data.guestEmail.toLowerCase(),
+      ownerId: ownerId || "demo_seller",
+      participantId: existingConversation?.participantId,
+      participantEmail:
+        data.participantEmail ||
+        existingConversation?.participantEmail ||
+        data.guestEmail.toLowerCase(),
       senderName: data.guestName,
       senderEmail: data.guestEmail.toLowerCase(),
       senderProfileImage: data.guestProfileImage || undefined,
-      productId: data.productId,
+      productId: resolvedProductId,
       message: data.message,
       location:
         data.latitude !== undefined && data.longitude !== undefined
@@ -86,6 +123,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ message });
   } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message || "Invalid chat payload." },
+        { status: 400 }
+      );
+    }
+
     const message = error instanceof Error ? error.message : "Unable to send chat.";
     return NextResponse.json({ error: message }, { status: 400 });
   }

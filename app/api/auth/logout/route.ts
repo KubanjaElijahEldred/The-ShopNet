@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { clearSessionCookie } from "@/lib/session";
+import { getSafeAppBaseUrl } from "@/lib/url";
 
-export async function POST(request: Request) {
+export async function POST() {
   await clearSessionCookie();
-  return NextResponse.redirect(new URL("/login", request.url));
+  const baseUrl = getSafeAppBaseUrl();
+  return NextResponse.redirect(new URL("/login", baseUrl));
 }

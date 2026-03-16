@@ -4,7 +4,9 @@ import { AddToCartButton } from "@/components/cart/AddToCartButton";
 import { ChatForm } from "@/components/forms/ChatForm";
 import { ReviewForm } from "@/components/forms/ReviewForm";
 import { WishlistButton } from "@/components/products/WishlistButton";
+import { ProductOwnerControls } from "@/components/products/ProductOwnerControls";
 import {
+  getProductById,
   getProducts,
   getReviewSummaryMap,
   getUserPublicProfiles,
@@ -45,14 +47,41 @@ export default async function ProductDetailPage({
 }) {
   const { id } = await params;
   const user = await getSessionUser();
-  const [products, reviewMap, ownerProfiles, wishlist] = await Promise.all([
-    getProducts(),
-    getReviewSummaryMap(),
-    getUserPublicProfiles(),
-    user ? getWishlistItems(user.id) : Promise.resolve([])
-  ]);
+  let product: Awaited<ReturnType<typeof getProductById>> = null;
+  let products: Awaited<ReturnType<typeof getProducts>> = [];
+  let reviewMap: Awaited<ReturnType<typeof getReviewSummaryMap>> = new Map();
+  let ownerProfiles: Awaited<ReturnType<typeof getUserPublicProfiles>> = [];
+  let wishlist: Awaited<ReturnType<typeof getWishlistItems>> = [];
 
-  const product = products.find((item) => item.id === id);
+  try {
+    [product, products, reviewMap, ownerProfiles, wishlist] = await Promise.all([
+      getProductById(id),
+      getProducts({ imageMode: "front" }),
+      getReviewSummaryMap(),
+      getUserPublicProfiles(),
+      user ? getWishlistItems(user.id) : Promise.resolve([])
+    ]);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to load product details right now.";
+
+    return (
+      <div className="stack-page">
+        <section className="stack-card">
+          <span className="eyebrow">Database</span>
+          <h1>Unable to load this product</h1>
+          <p className="muted">
+            ShopNet could not reach MongoDB. Check Atlas network access and your
+            `MONGODB_URI`, then try again.
+          </p>
+          <p className="muted">{message}</p>
+          <Link href="/products" className="button button-secondary">
+            Back to products
+          </Link>
+        </section>
+      </div>
+    );
+  }
 
   if (!product) {
     notFound();
@@ -61,6 +90,8 @@ export default async function ProductDetailPage({
   const ownerMap = new Map(ownerProfiles.map((profile) => [profile.id, profile]));
   const wishlistIds = new Set(wishlist.map((item) => item.id));
   const summary = reviewMap.get(product.id);
+  const canManageProduct =
+    Boolean(user) && (product.ownerId === user?.id || user?.role === "admin");
   const relatedProducts = products
     .filter((item) => item.id !== product.id)
     .map((item) => ({
@@ -115,6 +146,15 @@ export default async function ProductDetailPage({
                 initiallySaved={wishlistIds.has(product.id)}
               />
             </div>
+            {canManageProduct ? (
+              <div style={{ marginTop: "12px" }}>
+                <ProductOwnerControls
+                  productId={product.id}
+                  redirectOnDelete="/products"
+                  showViewLink={false}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="organic-visual-stage">

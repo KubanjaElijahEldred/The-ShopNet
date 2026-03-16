@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { SplashScreen } from "@/components/SplashScreen";
-import { AppNav } from "@/components/AppNav";
+import { GlobalNav } from "@/components/GlobalNav";
+import { KEETechAssistant } from "@/components/assistant/KEETechAssistant";
 import { getSessionUser } from "@/lib/session";
 import { clerkPublishableKey, hasClerkKeys } from "@/lib/clerk-config";
 
@@ -21,13 +22,16 @@ export default async function RootLayout({
   const shell = (
     <>
       <SplashScreen />
-      <AppNav user={user ? { name: user.name } : null} />
+      <GlobalNav
+        user={user ? { name: user.name, profileImage: user.profileImage } : null}
+      />
+      <KEETechAssistant />
       <main className="page-shell">{children}</main>
     </>
   );
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning data-scroll-behavior="smooth">
       <body>
         {hasClerkKeys ? (
           <ClerkProvider publishableKey={clerkPublishableKey}>{shell}</ClerkProvider>

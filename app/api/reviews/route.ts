@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { createReview, getReviews } from "@/lib/data";
 import { getSessionUser } from "@/lib/session";
+import { getSafeRequestUrl } from "@/lib/url";
 import { reviewSchema } from "@/lib/validators";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams } = getSafeRequestUrl(request, "/api/reviews");
   const productId = searchParams.get("productId") || undefined;
   const reviews = await getReviews(productId);
   return NextResponse.json({ reviews });

@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { demoStore, createId } from "@/lib/demo-store";
+import { demoStore, createId, persistDemoStore } from "@/lib/demo-store";
 import { connectToDatabase, dbEnabled } from "@/lib/db";
 import { User } from "@/models/User";
 import { Product } from "@/models/Product";
@@ -11,12 +11,14 @@ import { Order } from "@/models/Order";
 import { calculateCartTotals } from "@/lib/pricing";
 import { Notification } from "@/models/Notification";
 import { sendMobileAlert } from "@/lib/sms";
+import { sendOrderPlacedEmail, sendOrderStatusEmail } from "@/lib/email";
 
 type SignupInput = {
   name: string;
   email: string;
   password: string;
   location: string;
+  role?: "user" | "admin";
   mobileNumber?: string;
   profileImage?: string;
   shippingAddress?: string;
@@ -34,6 +36,13 @@ type ProductInput = {
   frontImage: string;
   sideImage: string;
   backImage: string;
+};
+
+type ProductUpdateInput = Partial<Omit<ProductInput, "ownerId">>;
+
+type ProductQueryOptions = {
+  limit?: number;
+  imageMode?: "all" | "front";
 };
 
 type ChatInput = {
@@ -66,6 +75,7 @@ type ReviewInput = {
 type CreateOrderInput = {
   userId: string;
   userName: string;
+  userEmail?: string;
   location: string;
   paymentMethod: string;
   couponCode?: string;
@@ -84,6 +94,7 @@ type OrderData = {
   id: string;
   userId: string;
   userName: string;
+  userEmail?: string;
   location: string;
   paymentMethod: string;
   status: string;
@@ -115,6 +126,27 @@ function isPresent<T>(value: T | null | undefined): value is T {
   return value != null;
 }
 
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function looksLikeBcryptHash(value: string) {
+  return /^\$2[aby]\$\d{2}\$/.test(value);
+}
+
+async function verifyPassword(password: string, storedValue?: string) {
+  if (!storedValue) {
+    return false;
+  }
+
+  if (looksLikeBcryptHash(storedValue)) {
+    return bcrypt.compare(password, storedValue);
+  }
+
+  // Compatibility for legacy records that may have stored plain passwords.
+  return storedValue === password;
+}
+
 function sortProducts<T extends { price: number; rating: number; createdAt?: string }>(
   products: T[],
   sortBy = "newest"
@@ -138,51 +170,291 @@ function sortProducts<T extends { price: number; rating: number; createdAt?: str
   );
 }
 
-export async function createUser(input: SignupInput) {
-  const passwordHash = await bcrypt.hash(input.password, 10);
+function normalizePositiveLimit(value?: number) {
+  if (!Number.isFinite(value) || value == null || value <= 0) {
+    return undefined;
+  }
 
-  if (dbEnabled) {
-    await connectToDatabase();
+  return Math.floor(value);
+}
 
-    const existing = await User.findOne({ email: input.email.toLowerCase() });
-    if (existing) {
-      throw new Error("An account with that email already exists.");
+function looksLikeMongoObjectId(value?: string) {
+  return Boolean(value && /^[a-fA-F0-9]{24}$/.test(value));
+}
+
+type ProductRecord = {
+  _id: unknown;
+  ownerId: string;
+  title: string;
+  description: string;
+  category: string;
+  price: number;
+  size: string;
+  rating: number;
+  stock: number;
+  frontImage: string;
+  sideImage: string;
+  backImage: string;
+  createdAt?: { toString?: () => string } | string | Date;
+};
+
+function productProjectionForImageMode(imageMode: "all" | "front" = "all") {
+  if (imageMode === "front") {
+    return "_id ownerId title description category price size rating stock frontImage createdAt";
+  }
+
+  return "_id ownerId title description category price size rating stock frontImage sideImage backImage createdAt";
+}
+
+function toProductData(product: ProductRecord, imageMode: "all" | "front" = "all") {
+  const frontImage = product.frontImage;
+  const sideImage = imageMode === "front" ? product.frontImage : product.sideImage;
+  const backImage = imageMode === "front" ? product.frontImage : product.backImage;
+
+  return {
+    id: stringifyId(product._id),
+    ownerId: product.ownerId,
+    title: product.title,
+    description: product.description,
+    category: product.category,
+    price: product.price,
+    size: product.size,
+    rating: product.rating,
+    stock: product.stock,
+    frontImage,
+    sideImage,
+    backImage,
+    createdAt: product.createdAt?.toString?.() || ""
+  };
+}
+
+function productSortToMongo(sortBy?: string): Record<string, 1 | -1> {
+  if (sortBy === "price-asc") {
+    return { price: 1 };
+  }
+
+  if (sortBy === "price-desc") {
+    return { price: -1 };
+  }
+
+  if (sortBy === "rating-desc") {
+    return { rating: -1 };
+  }
+
+  return { createdAt: -1 };
+}
+
+function canManageProduct(ownerId: string, userId: string, userRole?: string) {
+  return ownerId === userId || userRole === "admin";
+}
+
+function normalizeErrorText(error: unknown) {
+  const visited = new Set<unknown>();
+  const queue: unknown[] = [error];
+  const chunks: string[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null) {
+      continue;
     }
 
-    const user = await User.create({
-      name: input.name,
-      email: input.email.toLowerCase(),
-      passwordHash,
-      location: input.location,
-      mobileNumber: input.mobileNumber || undefined,
-      profileImage: input.profileImage || undefined,
-      shippingAddress: input.shippingAddress || undefined
-    });
+    if (typeof current === "object") {
+      if (visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+    }
 
-    return {
-      id: stringifyId(user._id),
-      name: user.name,
-      email: user.email,
-      location: user.location,
-      mobileNumber: user.mobileNumber,
-      profileImage: user.profileImage,
-      shippingAddress: user.shippingAddress
-    };
+    if (current instanceof Error) {
+      chunks.push(current.name, current.message, current.stack || "");
+      const withMeta = current as Error & {
+        code?: unknown;
+        cause?: unknown;
+        reason?: unknown;
+      };
+
+      if (withMeta.code != null) {
+        chunks.push(String(withMeta.code));
+      }
+      if (withMeta.cause != null) {
+        queue.push(withMeta.cause);
+      }
+      if (withMeta.reason != null) {
+        queue.push(withMeta.reason);
+      }
+      continue;
+    }
+
+    if (
+      typeof current === "string" ||
+      typeof current === "number" ||
+      typeof current === "boolean"
+    ) {
+      chunks.push(String(current));
+      continue;
+    }
+
+    if (typeof current === "object") {
+      const record = current as Record<string, unknown>;
+      const probableTextKeys = [
+        "name",
+        "message",
+        "stack",
+        "code",
+        "detail",
+        "error",
+        "reason",
+        "cause"
+      ];
+
+      probableTextKeys.forEach((key) => {
+        const value = record[key];
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+          chunks.push(String(value));
+        } else if (value && typeof value === "object") {
+          queue.push(value);
+        }
+      });
+
+      try {
+        chunks.push(JSON.stringify(current));
+      } catch {
+        chunks.push(String(current));
+      }
+      continue;
+    }
+
+    chunks.push(String(current));
+  }
+
+  return chunks.join(" ").toLowerCase();
+}
+
+function isExpectedTransientDbIssue(normalizedMessage: string) {
+  return (
+    normalizedMessage.includes("timed out") ||
+    normalizedMessage.includes("timeout") ||
+    normalizedMessage.includes("skipping new mongodb attempts") ||
+    normalizedMessage.includes("srv dns lookup failed") ||
+    normalizedMessage.includes("mongodb dns lookup failed") ||
+    normalizedMessage.includes("dns lookup failed") ||
+    normalizedMessage.includes("getaddrinfo") ||
+    normalizedMessage.includes("eai_again") ||
+    normalizedMessage.includes("enotfound") ||
+    normalizedMessage.includes("eservfail") ||
+    normalizedMessage.includes("server selection") ||
+    normalizedMessage.includes("topology is closed") ||
+    normalizedMessage.includes("querysrv") ||
+    normalizedMessage.includes("_mongodb._tcp") ||
+    normalizedMessage.includes("econnrefused")
+  );
+}
+
+function reportDbFallback(message: string, error: unknown) {
+  const normalizedMessage = normalizeErrorText(error);
+  const expectedTransientIssue = isExpectedTransientDbIssue(normalizedMessage);
+
+  if (!expectedTransientIssue) {
+    console.error(message, error);
+  }
+
+  if (error instanceof Error) {
+    throw error;
+  }
+
+  throw new Error(message);
+}
+
+export async function createUser(input: SignupInput) {
+  const passwordHash = await bcrypt.hash(input.password, 10);
+  const role: "user" | "admin" = input.role === "admin" ? "admin" : "user";
+  const normalizedName = input.name.trim();
+  const normalizedEmail = input.email.toLowerCase();
+
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+
+      const existingByEmail = await User.findOne({ email: normalizedEmail });
+      if (existingByEmail) {
+        throw new Error("That email already has an account.");
+      }
+
+      const existingByName = await User.findOne({
+        name: new RegExp(`^${escapeRegex(normalizedName)}$`, "i")
+      });
+      if (existingByName) {
+        throw new Error("That name is already in use. Please choose another name.");
+      }
+
+      const user = await User.create({
+        name: normalizedName,
+        email: normalizedEmail,
+        passwordHash,
+        role,
+        location: input.location,
+        mobileNumber: input.mobileNumber || undefined,
+        profileImage: input.profileImage || undefined,
+        shippingAddress: input.shippingAddress || undefined
+      });
+
+      return {
+        id: stringifyId(user._id),
+        name: user.name,
+        email: user.email,
+        location: user.location,
+        role: user.role || "user",
+        mobileNumber: user.mobileNumber,
+        profileImage: user.profileImage,
+        shippingAddress: user.shippingAddress
+      };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        [
+          "That email already has an account.",
+          "That name is already in use. Please choose another name."
+        ].includes(error.message)
+      ) {
+        throw error;
+      }
+
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === 11000
+      ) {
+        throw new Error("That email already has an account.");
+      }
+
+      reportDbFallback("MongoDB write failed in createUser; aborting request.", error);
+    }
   }
 
   const existing = demoStore.users.find(
-    (user) => user.email.toLowerCase() === input.email.toLowerCase()
+    (user) => user.email.toLowerCase() === normalizedEmail
   );
 
   if (existing) {
-    throw new Error("An account with that email already exists.");
+    throw new Error("That email already has an account.");
+  }
+
+  const existingName = demoStore.users.find(
+    (user) => user.name.trim().toLowerCase() === normalizedName.toLowerCase()
+  );
+
+  if (existingName) {
+    throw new Error("That name is already in use. Please choose another name.");
   }
 
   const user = {
     id: createId("usr"),
-    name: input.name,
-    email: input.email.toLowerCase(),
+    name: normalizedName,
+    email: normalizedEmail,
     passwordHash,
+    role,
     location: input.location,
     mobileNumber: input.mobileNumber || undefined,
     profileImage: input.profileImage || undefined,
@@ -190,12 +462,14 @@ export async function createUser(input: SignupInput) {
   };
 
   demoStore.users.push(user);
+  persistDemoStore();
 
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     location: user.location,
+    role: user.role,
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
     shippingAddress: user.shippingAddress
@@ -203,41 +477,49 @@ export async function createUser(input: SignupInput) {
 }
 
 export async function authenticateUser(email: string, password: string) {
+  const normalizedEmail = email.toLowerCase();
+
   if (dbEnabled) {
-    await connectToDatabase();
-    const user = await User.findOne({ email: email.toLowerCase() });
+    try {
+      await connectToDatabase();
+      const user = await User.findOne({ email: normalizedEmail });
 
-    if (!user) {
-      return null;
+      if (user) {
+        const valid = await verifyPassword(password, user.passwordHash);
+        if (valid) {
+          return {
+            id: stringifyId(user._id),
+            name: user.name,
+            email: user.email,
+            location: user.location,
+            role: user.role || "user",
+            mobileNumber: user.mobileNumber,
+            profileImage: user.profileImage,
+            shippingAddress: user.shippingAddress
+          };
+        }
+      }
+    } catch (error) {
+      reportDbFallback("MongoDB read failed in authenticateUser; aborting request.", error);
     }
-
-    const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      return null;
-    }
-
-    return {
-      id: stringifyId(user._id),
-      name: user.name,
-      email: user.email,
-      location: user.location,
-      mobileNumber: user.mobileNumber,
-      profileImage: user.profileImage,
-      shippingAddress: user.shippingAddress
-    };
   }
 
   const user = demoStore.users.find(
-    (candidate) => candidate.email.toLowerCase() === email.toLowerCase()
+    (candidate) => candidate.email.toLowerCase() === normalizedEmail
   );
 
   if (!user) {
     return null;
   }
 
-  const valid = await bcrypt.compare(password, user.passwordHash);
+  const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) {
     return null;
+  }
+
+  if (user.passwordHash && !looksLikeBcryptHash(user.passwordHash)) {
+    user.passwordHash = await bcrypt.hash(password, 10);
+    persistDemoStore();
   }
 
   return {
@@ -245,6 +527,7 @@ export async function authenticateUser(email: string, password: string) {
     name: user.name,
     email: user.email,
     location: user.location,
+    role: user.role || "user",
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
     shippingAddress: user.shippingAddress
@@ -255,19 +538,31 @@ export async function updateUserProfile(
   userId: string,
   payload: {
     mobileNumber: string;
-    profileImage?: string;
+    profileImage?: string | null;
     shippingAddress?: string;
   }
 ) {
   if (dbEnabled) {
     await connectToDatabase();
+    const updateData: {
+      mobileNumber: string;
+      profileImage?: string;
+      shippingAddress?: string;
+      $unset?: { profileImage: 1 };
+    } = {
+      mobileNumber: payload.mobileNumber,
+      shippingAddress: payload.shippingAddress || undefined
+    };
+
+    if (payload.profileImage === null) {
+      updateData.$unset = { profileImage: 1 };
+    } else {
+      updateData.profileImage = payload.profileImage || undefined;
+    }
+
     const user = await User.findByIdAndUpdate(
       userId,
-      {
-        mobileNumber: payload.mobileNumber,
-        profileImage: payload.profileImage || undefined,
-        shippingAddress: payload.shippingAddress || undefined
-      },
+      updateData,
       { new: true }
     );
 
@@ -280,6 +575,7 @@ export async function updateUserProfile(
       name: user.name,
       email: user.email,
       location: user.location,
+      role: user.role || "user",
       mobileNumber: user.mobileNumber,
       profileImage: user.profileImage,
       shippingAddress: user.shippingAddress
@@ -292,13 +588,15 @@ export async function updateUserProfile(
   }
 
   user.mobileNumber = payload.mobileNumber;
-  user.profileImage = payload.profileImage || undefined;
+  user.profileImage =
+    payload.profileImage === null ? undefined : payload.profileImage || undefined;
   user.shippingAddress = payload.shippingAddress || undefined;
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     location: user.location,
+    role: user.role || "user",
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
     shippingAddress: user.shippingAddress
@@ -320,10 +618,10 @@ export async function getUserPublicProfiles() {
         shippingAddress: user.shippingAddress
       }));
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getUserPublicProfiles; falling back to demo data.",
-        error
-      );
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB read failed in getUserPublicProfiles; aborting request.", error);
+      }
     }
   }
 
@@ -336,6 +634,103 @@ export async function getUserPublicProfiles() {
     profileImage: user.profileImage,
     shippingAddress: user.shippingAddress
   }));
+}
+
+export async function getUserPublicProfileById(userId?: string) {
+  if (!userId) {
+    return null;
+  }
+
+  // Clerk user IDs (e.g. "user_xxx") are not Mongo ObjectIds.
+  // Skip Mongo lookup to avoid CastError and allow graceful UI fallback.
+  if (!looksLikeMongoObjectId(userId)) {
+    return null;
+  }
+
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+      const user = (await User.findById(userId).lean()) as
+        | {
+            _id: unknown;
+            name: string;
+            email: string;
+            location: string;
+            mobileNumber?: string;
+            profileImage?: string;
+            shippingAddress?: string;
+          }
+        | null;
+
+      if (!user) {
+        return null;
+      }
+
+      return {
+        id: stringifyId(user._id),
+        name: user.name,
+        email: user.email,
+        location: user.location,
+        mobileNumber: user.mobileNumber,
+        profileImage: user.profileImage,
+        shippingAddress: user.shippingAddress
+      };
+    } catch (error) {
+      reportDbFallback("MongoDB read failed in getUserPublicProfileById; aborting request.", error);
+    }
+  }
+
+  const user = demoStore.users.find((entry) => entry.id === userId);
+  if (!user) {
+    return null;
+  }
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    location: user.location,
+    mobileNumber: user.mobileNumber,
+    profileImage: user.profileImage,
+    shippingAddress: user.shippingAddress
+  };
+}
+
+async function getUserContactById(userId: string) {
+  if (!looksLikeMongoObjectId(userId)) {
+    return null;
+  }
+
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+      const user = (await User.findById(userId).lean()) as
+        | { name?: string; email: string }
+        | null;
+
+      if (user) {
+        return {
+          name: user.name || "ShopNet User",
+          email: user.email
+        };
+      }
+    } catch (error) {
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB read failed in getUserContactById; aborting request.", error);
+      }
+    }
+  }
+
+  const user = demoStore.users.find((entry) => entry.id === userId);
+  if (!user) {
+    return null;
+  }
+
+  return {
+    name: user.name,
+    email: user.email
+  };
 }
 
 export async function createNotification(input: NotificationInput) {
@@ -369,6 +764,7 @@ export async function createNotification(input: NotificationInput) {
   };
 
   demoStore.notifications.push(notification);
+  persistDemoStore();
   return notification;
 }
 
@@ -392,10 +788,7 @@ export async function getNotificationsForUser(userId: string) {
         createdAt: notification.createdAt?.toString?.() || ""
       }));
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getNotificationsForUser; falling back to demo data.",
-        error
-      );
+      reportDbFallback("MongoDB read failed in getNotificationsForUser; aborting request.", error);
     }
   }
 
@@ -404,41 +797,128 @@ export async function getNotificationsForUser(userId: string) {
     .reverse();
 }
 
-export async function getProducts() {
+export async function getProducts(options?: ProductQueryOptions) {
+  const limit = normalizePositiveLimit(options?.limit);
+  const imageMode = options?.imageMode || "all";
+  const fallbackProducts = [...demoStore.products].reverse();
+
   if (dbEnabled) {
     try {
       await connectToDatabase();
-      const products = await Product.find().sort({ createdAt: -1 }).lean();
-      return products.map((product) => ({
-        id: stringifyId(product._id),
-        ownerId: product.ownerId,
-        title: product.title,
-        description: product.description,
-        category: product.category,
-        price: product.price,
-        size: product.size,
-        rating: product.rating,
-        stock: product.stock,
-        frontImage: product.frontImage,
-        sideImage: product.sideImage,
-        backImage: product.backImage,
-        createdAt: product.createdAt?.toString?.() || ""
-      }));
+      let query = Product.find()
+        .select(productProjectionForImageMode(imageMode))
+        .sort({ createdAt: -1 });
+
+      if (limit) {
+        query = query.limit(limit);
+      }
+
+      const products = await query.lean();
+      return products.map((product) =>
+        toProductData(product as unknown as ProductRecord, imageMode)
+      );
     } catch (error) {
-      // Keep the UI available even when MongoDB is temporarily unreachable.
-      console.error("MongoDB read failed in getProducts; falling back to demo data.", error);
+      const normalizedMessage = normalizeErrorText(error);
+      if (isExpectedTransientDbIssue(normalizedMessage)) {
+        const fallback = limit ? fallbackProducts.slice(0, limit) : fallbackProducts;
+        return fallback.map((product) =>
+          imageMode === "front"
+            ? { ...product, sideImage: product.frontImage, backImage: product.frontImage }
+            : product
+        );
+      }
+      reportDbFallback("MongoDB read failed in getProducts; aborting request.", error);
     }
   }
 
-  return [...demoStore.products].reverse();
+  const fallback = limit ? fallbackProducts.slice(0, limit) : fallbackProducts;
+  return fallback.map((product) =>
+    imageMode === "front"
+      ? { ...product, sideImage: product.frontImage, backImage: product.frontImage }
+      : product
+  );
+}
+
+export async function getProductById(productId?: string) {
+  if (!productId) {
+    return null;
+  }
+
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+
+      if (!looksLikeMongoObjectId(productId)) {
+        return null;
+      }
+
+      const product = await Product.findById(productId).lean();
+
+      if (!product) {
+        return null;
+      }
+
+      return toProductData(product as unknown as ProductRecord);
+    } catch (error) {
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB read failed in getProductById; aborting request.", error);
+      }
+    }
+  }
+
+  return demoStore.products.find((product) => product.id === productId) || null;
 }
 
 export async function getFilteredProducts(options?: {
   query?: string;
   category?: string;
   sortBy?: string;
+  imageMode?: "all" | "front";
 }) {
-  const allProducts = await getProducts();
+  const imageMode = options?.imageMode || "front";
+
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+
+      const normalizedQuery = options?.query?.trim();
+      const normalizedCategory = options?.category?.trim();
+      const mongoFilter: {
+        category?: string;
+        $or?: Array<{
+          title?: RegExp;
+          description?: RegExp;
+          category?: RegExp;
+        }>;
+      } = {};
+
+      if (normalizedQuery) {
+        const pattern = new RegExp(escapeRegex(normalizedQuery), "i");
+        mongoFilter.$or = [{ title: pattern }, { description: pattern }, { category: pattern }];
+      }
+
+      if (normalizedCategory) {
+        mongoFilter.category = normalizedCategory;
+      }
+
+      const products = await Product.find(mongoFilter)
+        .select(productProjectionForImageMode(imageMode))
+        .sort(productSortToMongo(options?.sortBy))
+        .lean();
+
+      return products.map((product) =>
+        toProductData(product as unknown as ProductRecord, imageMode)
+      );
+    } catch (error) {
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB read failed in getFilteredProducts; aborting request.", error);
+      }
+    }
+  }
+
+  const allProducts = await getProducts({ imageMode });
   const query = options?.query?.toLowerCase().trim();
   const category = options?.category?.trim();
 
@@ -458,12 +938,19 @@ export async function getFilteredProducts(options?: {
 
 export async function createProduct(input: ProductInput) {
   if (dbEnabled) {
-    await connectToDatabase();
-    const product = await Product.create(input);
-    return {
-      id: stringifyId(product._id),
-      ...input
-    };
+    try {
+      await connectToDatabase();
+      const product = await Product.create(input);
+      return {
+        id: stringifyId(product._id),
+        ...input
+      };
+    } catch (error) {
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB write failed in createProduct; aborting request.", error);
+      }
+    }
   }
 
   const product = {
@@ -473,7 +960,146 @@ export async function createProduct(input: ProductInput) {
   };
 
   demoStore.products.push(product);
+  persistDemoStore();
   return product;
+}
+
+export async function updateProduct(
+  productId: string,
+  userId: string,
+  input: ProductUpdateInput,
+  userRole?: string
+) {
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+      const product = await Product.findById(productId);
+
+      if (!product) {
+        throw new Error("Product not found.");
+      }
+
+      if (!canManageProduct(product.ownerId, userId, userRole)) {
+        throw new Error("You cannot update this product.");
+      }
+
+      Object.entries(input).forEach(([key, value]) => {
+        if (value !== undefined) {
+          // Assign only defined updates from validated payload.
+          (product as unknown as Record<string, unknown>)[key] = value;
+        }
+      });
+
+      await product.save();
+
+      return {
+        id: stringifyId(product._id),
+        ownerId: product.ownerId,
+        title: product.title,
+        description: product.description,
+        category: product.category,
+        price: product.price,
+        size: product.size,
+        rating: product.rating,
+        stock: product.stock,
+        frontImage: product.frontImage,
+        sideImage: product.sideImage,
+        backImage: product.backImage,
+        createdAt: product.createdAt?.toString?.() || ""
+      };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        ["Product not found.", "You cannot update this product."].includes(error.message)
+      ) {
+        throw error;
+      }
+
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB write failed in updateProduct; aborting request.", error);
+      }
+    }
+  }
+
+  const product = demoStore.products.find((entry) => entry.id === productId);
+
+  if (!product) {
+    throw new Error("Product not found.");
+  }
+
+  if (!canManageProduct(product.ownerId, userId, userRole)) {
+    throw new Error("You cannot update this product.");
+  }
+
+  Object.entries(input).forEach(([key, value]) => {
+    if (value !== undefined) {
+      (product as unknown as Record<string, unknown>)[key] = value;
+    }
+  });
+
+  persistDemoStore();
+  return product;
+}
+
+export async function deleteProduct(productId: string, userId: string, userRole?: string) {
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+      const product = await Product.findById(productId);
+
+      if (!product) {
+        throw new Error("Product not found.");
+      }
+
+      if (!canManageProduct(product.ownerId, userId, userRole)) {
+        throw new Error("You cannot delete this product.");
+      }
+
+      await Promise.all([
+        Product.deleteOne({ _id: productId }),
+        CartItem.deleteMany({ productId }),
+        WishlistItem.deleteMany({ productId }),
+        Review.deleteMany({ productId }),
+        Notification.deleteMany({ relatedProductId: productId })
+      ]);
+
+      return { id: productId };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        ["Product not found.", "You cannot delete this product."].includes(error.message)
+      ) {
+        throw error;
+      }
+
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB write failed in deleteProduct; aborting request.", error);
+      }
+    }
+  }
+
+  const product = demoStore.products.find((entry) => entry.id === productId);
+
+  if (!product) {
+    throw new Error("Product not found.");
+  }
+
+  if (!canManageProduct(product.ownerId, userId, userRole)) {
+    throw new Error("You cannot delete this product.");
+  }
+
+  demoStore.products = demoStore.products.filter((entry) => entry.id !== productId);
+  demoStore.cartItems = demoStore.cartItems.filter((entry) => entry.productId !== productId);
+  demoStore.wishlistItems = demoStore.wishlistItems.filter((entry) => entry.productId !== productId);
+  demoStore.reviews = demoStore.reviews.filter((entry) => entry.productId !== productId);
+  demoStore.notifications = demoStore.notifications.filter(
+    (entry) => entry.relatedProductId !== productId
+  );
+
+  persistDemoStore();
+  return { id: productId };
 }
 
 export async function addCartItem(userId: string, productId: string, quantity: number) {
@@ -496,11 +1122,13 @@ export async function addCartItem(userId: string, productId: string, quantity: n
 
   if (existing) {
     existing.quantity += quantity;
+    persistDemoStore();
     return existing;
   }
 
   const item = { userId, productId, quantity };
   demoStore.cartItems.push(item);
+  persistDemoStore();
   return item;
 }
 
@@ -533,10 +1161,12 @@ export async function updateCartItemQuantity(
     demoStore.cartItems = demoStore.cartItems.filter(
       (entry) => !(entry.userId === userId && entry.productId === productId)
     );
+    persistDemoStore();
     return;
   }
 
   item.quantity = quantity;
+  persistDemoStore();
 }
 
 export async function removeCartItem(userId: string, productId: string) {
@@ -560,7 +1190,7 @@ export async function getCartItems(userId: string) {
         }))
         .filter(hasProduct);
     } catch (error) {
-      console.error("MongoDB read failed in getCartItems; falling back to demo data.", error);
+      reportDbFallback("MongoDB read failed in getCartItems; aborting request.", error);
     }
   }
 
@@ -581,6 +1211,7 @@ export async function clearCart(userId: string) {
   }
 
   demoStore.cartItems = demoStore.cartItems.filter((item) => item.userId !== userId);
+  persistDemoStore();
 }
 
 export async function addWishlistItem(userId: string, productId: string) {
@@ -611,6 +1242,7 @@ export async function addWishlistItem(userId: string, productId: string) {
   };
 
   demoStore.wishlistItems.push(item);
+  persistDemoStore();
   return item;
 }
 
@@ -624,10 +1256,11 @@ export async function removeWishlistItem(userId: string, productId: string) {
   demoStore.wishlistItems = demoStore.wishlistItems.filter(
     (item) => !(item.userId === userId && item.productId === productId)
   );
+  persistDemoStore();
 }
 
 export async function getWishlistItems(userId: string) {
-  const products = await getProducts();
+  const products = await getProducts({ imageMode: "front" });
 
   if (dbEnabled) {
     try {
@@ -637,10 +1270,7 @@ export async function getWishlistItems(userId: string) {
         .map((item) => products.find((product) => product.id === item.productId))
         .filter(isPresent);
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getWishlistItems; falling back to demo data.",
-        error
-      );
+      reportDbFallback("MongoDB read failed in getWishlistItems; aborting request.", error);
     }
   }
 
@@ -668,6 +1298,7 @@ export async function createReview(input: ReviewInput) {
   };
 
   demoStore.reviews.push(review);
+  persistDemoStore();
   return review;
 }
 
@@ -687,7 +1318,10 @@ export async function getReviews(productId?: string) {
         createdAt: review.createdAt?.toString?.() || ""
       }));
     } catch (error) {
-      console.error("MongoDB read failed in getReviews; falling back to demo data.", error);
+      const normalizedMessage = normalizeErrorText(error);
+      if (!isExpectedTransientDbIssue(normalizedMessage)) {
+        reportDbFallback("MongoDB read failed in getReviews; aborting request.", error);
+      }
     }
   }
 
@@ -775,6 +1409,7 @@ export async function createOrder(input: CreateOrderInput) {
     };
 
     demoStore.orders.push(order);
+    persistDemoStore();
     await clearCart(input.userId);
     createdOrder = order;
   }
@@ -802,6 +1437,25 @@ export async function createOrder(input: CreateOrderInput) {
     if (ownerProfile?.mobileNumber) {
       await sendMobileAlert(ownerProfile.mobileNumber, body);
     }
+  }
+
+  try {
+    const buyer =
+      input.userEmail
+        ? { email: input.userEmail, name: input.userName }
+        : await getUserContactById(input.userId);
+
+    if (buyer?.email) {
+      await sendOrderPlacedEmail({
+        to: buyer.email,
+        userName: buyer.name || input.userName,
+        orderId: createdOrder.id,
+        orderStatus: createdOrder.status,
+        orderTotal: createdOrder.total
+      });
+    }
+  } catch (error) {
+    console.error("Failed to send order confirmation email.", error);
   }
 
   return createdOrder;
@@ -860,6 +1514,8 @@ async function decrementInventoryForOrder(
       });
     }
   }
+
+  persistDemoStore();
 }
 
 export async function getOrdersForUser(userId: string) {
@@ -871,6 +1527,7 @@ export async function getOrdersForUser(userId: string) {
         id: stringifyId(order._id),
         userId: order.userId,
         userName: order.userName,
+        userEmail: order.userEmail,
         location: order.location,
         paymentMethod: order.paymentMethod,
         status: order.status,
@@ -884,7 +1541,7 @@ export async function getOrdersForUser(userId: string) {
         createdAt: order.createdAt?.toString?.() || ""
       }));
     } catch (error) {
-      console.error("MongoDB read failed in getOrdersForUser; falling back to demo data.", error);
+      reportDbFallback("MongoDB read failed in getOrdersForUser; aborting request.", error);
     }
   }
 
@@ -904,6 +1561,7 @@ export async function getOrdersForSeller(ownerId: string) {
         id: stringifyId(order._id),
         userId: order.userId,
         userName: order.userName,
+        userEmail: order.userEmail,
         location: order.location,
         paymentMethod: order.paymentMethod,
         status: order.status,
@@ -917,10 +1575,7 @@ export async function getOrdersForSeller(ownerId: string) {
         createdAt: order.createdAt?.toString?.() || ""
       }));
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getOrdersForSeller; falling back to demo data.",
-        error
-      );
+      reportDbFallback("MongoDB read failed in getOrdersForSeller; aborting request.", error);
     }
   }
 
@@ -958,6 +1613,24 @@ export async function updateOrderStatus(
 
     order.status = nextStatus;
     await order.save();
+
+    try {
+      const orderEmail = typeof order.userEmail === "string" ? order.userEmail : "";
+      const buyer = orderEmail
+        ? { email: orderEmail, name: order.userName || "ShopNet User" }
+        : await getUserContactById(order.userId);
+      if (buyer?.email) {
+        await sendOrderStatusEmail({
+          to: buyer.email,
+          userName: buyer.name,
+          orderId: stringifyId(order._id),
+          orderStatus: order.status
+        });
+      }
+    } catch (error) {
+      console.error("Failed to send order status email.", error);
+    }
+
     return { id: stringifyId(order._id), status: order.status };
   }
 
@@ -978,11 +1651,33 @@ export async function updateOrderStatus(
   }
 
   order.status = nextStatus;
+  persistDemoStore();
+
+  try {
+    const buyer =
+      order.userEmail
+        ? { email: order.userEmail, name: order.userName || "ShopNet User" }
+        : await getUserContactById(order.userId);
+    if (buyer?.email) {
+      await sendOrderStatusEmail({
+        to: buyer.email,
+        userName: buyer.name,
+        orderId: order.id,
+        orderStatus: order.status
+      });
+    }
+  } catch (error) {
+    console.error("Failed to send order status email.", error);
+  }
+
   return { id: order.id, status: order.status };
 }
 
 export async function getAdminOverview() {
-  const [users, products] = await Promise.all([getUserPublicProfiles(), getProducts()]);
+  const [users, products] = await Promise.all([
+    getUserPublicProfiles(),
+    getProducts({ imageMode: "front" })
+  ]);
   let orders = [...demoStore.orders].reverse().map((order) => ({
     id: order.id,
     userName: order.userName,
@@ -1009,10 +1704,7 @@ export async function getAdminOverview() {
       }));
       notificationCount = count;
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getAdminOverview; falling back to demo data.",
-        error
-      );
+      reportDbFallback("MongoDB read failed in getAdminOverview; aborting request.", error);
     }
   }
 
@@ -1029,7 +1721,7 @@ export async function getAdminOverview() {
 }
 
 export async function getSellerDashboard(ownerId: string) {
-  const products = await getProducts();
+  const products = await getProducts({ imageMode: "front" });
   const reviews = await getReviews();
   const orders = await getOrdersForSeller(ownerId);
   const chats = await getChatMessagesForUser(ownerId);
@@ -1062,18 +1754,22 @@ export async function createChatMessage(input: ChatInput) {
   const conversationId = input.conversationId || createId("cnv");
 
   if (dbEnabled) {
-    await connectToDatabase();
-    const message = await ChatMessage.create({
-      ...input,
-      conversationId
-    });
-    return {
-      id: stringifyId(message._id),
-      conversationId,
-      ...input,
-      location: input.location,
-      createdAt: message.createdAt?.toString?.() || new Date().toISOString()
-    };
+    try {
+      await connectToDatabase();
+      const message = await ChatMessage.create({
+        ...input,
+        conversationId
+      });
+      return {
+        id: stringifyId(message._id),
+        conversationId,
+        ...input,
+        location: input.location,
+        createdAt: message.createdAt?.toString?.() || new Date().toISOString()
+      };
+    } catch (error) {
+      reportDbFallback("MongoDB write failed in createChatMessage; aborting request.", error);
+    }
   }
 
   const message = {
@@ -1084,7 +1780,59 @@ export async function createChatMessage(input: ChatInput) {
   };
 
   demoStore.chats.push(message);
+  persistDemoStore();
   return message;
+}
+
+export async function getChatConversationContext(conversationId: string) {
+  if (!conversationId) {
+    return null;
+  }
+
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+      const message = (await ChatMessage.findOne({ conversationId })
+        .sort({ createdAt: -1 })
+        .lean()) as
+        | {
+            conversationId: string;
+            ownerId: string;
+            participantId?: string;
+            participantEmail?: string;
+            productId?: string;
+          }
+        | null;
+
+      if (message) {
+        return {
+          conversationId: message.conversationId,
+          ownerId: message.ownerId,
+          participantId: message.participantId,
+          participantEmail: message.participantEmail,
+          productId: message.productId
+        };
+      }
+    } catch (error) {
+      reportDbFallback("MongoDB read failed in getChatConversationContext; aborting request.", error);
+    }
+  }
+
+  const message = [...demoStore.chats]
+    .reverse()
+    .find((entry) => entry.conversationId === conversationId);
+
+  if (!message) {
+    return null;
+  }
+
+  return {
+    conversationId: message.conversationId,
+    ownerId: message.ownerId,
+    participantId: message.participantId,
+    participantEmail: message.participantEmail,
+    productId: message.productId
+  };
 }
 
 export async function getChatMessagesForUser(userId?: string) {
@@ -1099,7 +1847,7 @@ export async function getChatMessagesForUser(userId?: string) {
       const messages = await ChatMessage.find(query).sort({ createdAt: -1 }).lean();
       return messages.map((message) => ({
         id: stringifyId(message._id),
-        conversationId: message.conversationId,
+        conversationId: message.conversationId || stringifyId(message._id),
         ownerId: message.ownerId,
         participantId: message.participantId,
         participantEmail: message.participantEmail,
@@ -1121,10 +1869,7 @@ export async function getChatMessagesForUser(userId?: string) {
         createdAt: message.createdAt?.toString?.() || ""
       }));
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getChatMessagesForUser; falling back to demo data.",
-        error
-      );
+      reportDbFallback("MongoDB read failed in getChatMessagesForUser; aborting request.", error);
     }
   }
 
@@ -1134,6 +1879,11 @@ export async function getChatMessagesForUser(userId?: string) {
         ? message.ownerId === userId || message.participantId === userId
         : true
     )
+    .map((message, index) => ({
+      ...message,
+      conversationId:
+        message.conversationId || message.id || `legacy-conversation-${index}`
+    }))
     .reverse();
 }
 
@@ -1155,7 +1905,7 @@ export async function getChatMessagesForGuest(email?: string) {
 
       return messages.map((message) => ({
         id: stringifyId(message._id),
-        conversationId: message.conversationId,
+        conversationId: message.conversationId || stringifyId(message._id),
         ownerId: message.ownerId,
         participantId: message.participantId,
         participantEmail: message.participantEmail,
@@ -1177,14 +1927,16 @@ export async function getChatMessagesForGuest(email?: string) {
         createdAt: message.createdAt?.toString?.() || ""
       }));
     } catch (error) {
-      console.error(
-        "MongoDB read failed in getChatMessagesForGuest; falling back to demo data.",
-        error
-      );
+      reportDbFallback("MongoDB read failed in getChatMessagesForGuest; aborting request.", error);
     }
   }
 
   return [...demoStore.chats]
     .filter((message) => message.participantEmail?.toLowerCase() === normalizedEmail)
+    .map((message, index) => ({
+      ...message,
+      conversationId:
+        message.conversationId || message.id || `legacy-conversation-${index}`
+    }))
     .reverse();
 }

@@ -18,12 +18,16 @@ export async function PATCH(request: Request) {
     const data = profileSchema.parse(payload);
     const updatedUser = await updateUserProfile(user.id, {
       mobileNumber: data.mobileNumber,
-      profileImage: data.profileImage || undefined,
+      profileImage: data.profileImage === "" ? null : data.profileImage || undefined,
       shippingAddress: data.shippingAddress || undefined
     });
-    await setSessionCookie(signSession(updatedUser));
+    const sessionUser = {
+      ...updatedUser,
+      role: updatedUser.role || user.role || "user"
+    };
+    await setSessionCookie(signSession(sessionUser));
 
-    return NextResponse.json({ user: updatedUser });
+    return NextResponse.json({ user: sessionUser });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to update your profile.";

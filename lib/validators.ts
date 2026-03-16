@@ -3,6 +3,66 @@ import { z } from "zod";
 export const passwordRule =
   "Password must have at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character.";
 
+function isValidImageReference(value: string) {
+  if (value.startsWith("data:image/")) {
+    return true;
+  }
+
+  return z.string().url().safeParse(value).success;
+}
+
+const imageInputSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    const normalized = value.trim();
+    return normalized === "" ? undefined : normalized;
+  },
+  z
+    .string()
+    .refine(
+      (value) => isValidImageReference(value),
+      "Profile image must be a valid URL or uploaded image."
+    )
+    .optional()
+);
+
+const guestImageInputSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    const normalized = value.trim();
+    return normalized === "" ? undefined : normalized;
+  },
+  z
+    .string()
+    .refine(
+      (value) => isValidImageReference(value),
+      "Profile image must be a valid URL or uploaded image."
+    )
+    .optional()
+);
+
+const profileImageUpdateSchema = z
+  .string()
+  .trim()
+  .refine(
+    (value) => value === "" || isValidImageReference(value),
+    "Profile image must be a valid URL or uploaded image."
+  );
+
+const productImageSchema = z
+  .string()
+  .trim()
+  .refine(
+    (value) => isValidImageReference(value),
+    "Product image must be a valid URL or uploaded image."
+  );
+
 export const signupSchema = z
   .object({
     name: z.string().min(2, "Name is required."),
@@ -12,8 +72,9 @@ export const signupSchema = z
       .trim()
       .optional()
       .or(z.literal("")),
-    profileImage: z.string().url("Profile image must be a valid URL.").optional().or(z.literal("")),
+    profileImage: imageInputSchema,
     shippingAddress: z.string().optional().or(z.literal("")),
+    role: z.enum(["user", "admin"]).optional(),
     password: z
       .string()
       .min(8, passwordRule)
@@ -42,10 +103,16 @@ export const productSchema = z.object({
   size: z.string().min(1, "Size is required."),
   rating: z.coerce.number().min(1).max(5),
   stock: z.coerce.number().int().min(1),
-  frontImage: z.string().url("Front image must be a valid URL."),
-  sideImage: z.string().url("Side image must be a valid URL."),
-  backImage: z.string().url("Back image must be a valid URL.")
+  frontImage: productImageSchema,
+  sideImage: productImageSchema,
+  backImage: productImageSchema
 });
+
+export const productUpdateSchema = productSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Provide at least one product field to update."
+  });
 
 export const chatSchema = z.object({
   conversationId: z.string().optional(),
@@ -54,7 +121,7 @@ export const chatSchema = z.object({
   productId: z.string().optional(),
   guestName: z.string().optional(),
   guestEmail: z.string().email("A valid email is required.").optional().or(z.literal("")),
-  guestProfileImage: z.string().url("Profile image must be a valid URL.").optional().or(z.literal("")),
+  guestProfileImage: guestImageInputSchema,
   message: z.string().min(1, "Message is required."),
   latitude: z.coerce.number().optional(),
   longitude: z.coerce.number().optional(),
@@ -66,10 +133,7 @@ export const profileSchema = z.object({
     .string()
     .trim()
     .min(7, "Mobile number is too short."),
-  profileImage: z
-    .string()
-    .url("Profile image must be a valid URL.")
-    .or(z.literal("")),
+  profileImage: profileImageUpdateSchema,
   shippingAddress: z.string().optional().or(z.literal(""))
 });
 

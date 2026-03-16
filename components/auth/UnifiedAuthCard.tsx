@@ -1,46 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { SignIn, SignUp, useSignIn, useSignUp } from "@clerk/nextjs";
+import { SignIn, SignUp } from "@clerk/nextjs";
 
 type Mode = "signin" | "signup";
 
 export function UnifiedAuthCard({ initialMode = "signin" }: { initialMode?: Mode }) {
   const [mode, setMode] = useState<Mode>(initialMode);
-  const { isLoaded: signInLoaded, signIn } = useSignIn();
-  const { isLoaded: signUpLoaded, signUp } = useSignUp();
-  const [pendingGoogle, setPendingGoogle] = useState(false);
-
-  async function continueWithGoogle() {
-    setPendingGoogle(true);
-
-    try {
-      if (mode === "signin") {
-        if (!signInLoaded || !signIn) {
-          return;
-        }
-
-        await signIn.authenticateWithRedirect({
-          strategy: "oauth_google",
-          redirectUrl: "/sso-callback",
-          redirectUrlComplete: "/"
-        });
-        return;
-      }
-
-      if (!signUpLoaded || !signUp) {
-        return;
-      }
-
-      await signUp.authenticateWithRedirect({
-        strategy: "oauth_google",
-        redirectUrl: "/sso-callback",
-        redirectUrlComplete: "/"
-      });
-    } finally {
-      setPendingGoogle(false);
-    }
-  }
 
   return (
     <section className="auth-shell">
@@ -72,19 +38,18 @@ export function UnifiedAuthCard({ initialMode = "signin" }: { initialMode?: Mode
           </button>
         </div>
 
-        <button
-          type="button"
-          className="auth-google-button"
-          disabled={pendingGoogle}
-          onClick={continueWithGoogle}
-        >
-          {pendingGoogle ? "Connecting..." : "Continue with Google"}
+          <button
+            type="button"
+            className="auth-google-button"
+            disabled
+          >
+          Continue with Google
         </button>
 
         <div className="auth-clerk-card">
           {mode === "signin" ? (
             <SignIn
-              routing="virtual"
+              routing="hash"
               forceRedirectUrl="/"
               appearance={{
                 elements: {
@@ -97,7 +62,7 @@ export function UnifiedAuthCard({ initialMode = "signin" }: { initialMode?: Mode
             />
           ) : (
             <SignUp
-              routing="virtual"
+              routing="hash"
               forceRedirectUrl="/"
               appearance={{
                 elements: {

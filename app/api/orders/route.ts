@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     const order = await createOrder({
       userId: user.id,
       userName: user.name,
+      userEmail: user.email,
       ...data
     });
 

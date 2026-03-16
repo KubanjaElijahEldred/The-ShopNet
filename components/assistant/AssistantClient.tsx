@@ -24,7 +24,7 @@ export function AssistantClient() {
   const [messages, setMessages] = useState<AssistantMessage[]>([
     createMessage(
       "assistant",
-      "I can help you search for products, add items to cart, start a chat with the owner, or place an order.",
+      "I am K.E.E Tech. I can help with products, cart, chat, orders, profile, admin pages, and assistant actions.",
       "assistant-welcome"
     )
   ]);
@@ -60,8 +60,8 @@ export function AssistantClient() {
   return (
     <section className="assistant-layout">
       <div className="stack-card">
-        <span className="eyebrow">ShopNet AI</span>
-        <h1>Shopping assistant</h1>
+        <span className="eyebrow">K.E.E Tech</span>
+        <h1>Smart system assistant</h1>
         <div className="assistant-thread">
           {messages.map((message, index) => (
             <div

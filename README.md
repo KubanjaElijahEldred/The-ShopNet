@@ -37,4 +37,16 @@ JWT_SECRET=replace-this-with-a-long-random-secret
 npm run dev
 ```
 
-If `MONGODB_URI` is empty, ShopNet falls back to a temporary in-memory demo store so you can still explore the interface.
+`MONGODB_URI` is required in all environments. Demo/mock fallback is disabled, so the app reads and writes only real database data.
+
+When MongoDB is unreachable (for example DNS/Atlas network issues), the app briefly cools down before retrying so pages do not stall on every request.
+
+## Clerk in local development
+
+By default, Clerk is disabled in local development to avoid hard failures when external auth scripts are blocked or timing out.
+
+To enable Clerk locally, set:
+
+```env
+NEXT_PUBLIC_ENABLE_CLERK_IN_DEV=true
+```

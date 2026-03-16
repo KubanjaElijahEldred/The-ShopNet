@@ -17,4 +17,8 @@ const ProductSchema = new Schema(
   { timestamps: true }
 );
 
+ProductSchema.index({ createdAt: -1 });
+ProductSchema.index({ category: 1, createdAt: -1 });
+ProductSchema.index({ ownerId: 1, createdAt: -1 });
+
 export const Product = models.Product || model("Product", ProductSchema);

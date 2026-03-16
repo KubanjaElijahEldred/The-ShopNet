@@ -1,11 +1,32 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { createProduct, getProducts } from "@/lib/data";
 import { getSessionUser } from "@/lib/session";
 import { productSchema } from "@/lib/validators";
 
+function statusFromMessage(message: string) {
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("timed out") ||
+    normalized.includes("skipping new mongodb attempts") ||
+    normalized.includes("mongodb")
+  ) {
+    return 503;
+  }
+
+  return 400;
+}
+
 export async function GET() {
-  const products = await getProducts();
-  return NextResponse.json({ products });
+  try {
+    const products = await getProducts({ imageMode: "front" });
+    return NextResponse.json({ products });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to load products.";
+    return NextResponse.json({ error: message }, { status: statusFromMessage(message) });
+  }
 }
 
 export async function POST(request: Request) {
@@ -28,8 +49,15 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ product });
   } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message || "Invalid product details." },
+        { status: 400 }
+      );
+    }
+
     const message =
       error instanceof Error ? error.message : "Unable to create product.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json({ error: message }, { status: statusFromMessage(message) });
   }
 }

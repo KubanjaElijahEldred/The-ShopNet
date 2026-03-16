@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 type SlideProduct = {
   id: string;
+  ownerId?: string;
   title: string;
   price: number;
   frontImage: string;
@@ -66,7 +67,15 @@ export function CategorySalesSlider({ slides }: { slides: SalesSlide[] }) {
                 </div>
                 <div className="category-sale-actions">
                   <Link href={`/products/${product.id}`}>View product</Link>
-                  <Link href={`/chat?productId=${product.id}`} aria-label={`Chat about ${product.title}`}>
+                  <Link
+                    href={{
+                      pathname: "/chat",
+                      query: product.ownerId
+                        ? { productId: product.id, ownerId: product.ownerId }
+                        : { productId: product.id }
+                    }}
+                    aria-label={`Chat about ${product.title}`}
+                  >
                     💬
                   </Link>
                 </div>

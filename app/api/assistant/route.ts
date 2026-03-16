@@ -3,7 +3,10 @@ import {
   addCartItem,
   createChatMessage,
   createOrder,
-  getFilteredProducts
+  getCartItems,
+  getFilteredProducts,
+  getOrdersForUser,
+  getWishlistItems
 } from "@/lib/data";
 import { getSessionUser } from "@/lib/session";
 
@@ -35,6 +38,17 @@ function heuristicIntent(text: string) {
   return "search";
 }
 
+function formatMoney(value: number) {
+  return `UGX ${value.toLocaleString()}`;
+}
+
+function summarizeConversation(messages: AssistantRequest["messages"]) {
+  return messages
+    .slice(-10)
+    .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
+    .join("\n");
+}
+
 export async function POST(request: Request) {
   const body = (await request.json()) as AssistantRequest;
   const user = await getSessionUser();
@@ -46,9 +60,9 @@ export async function POST(request: Request) {
     const top = products.slice(0, 3);
     const reply =
       top.length === 0
-        ? "I could not find a matching product."
-        : `I found these products: ${top
-            .map((product) => `${product.title} (UGX ${product.price.toLocaleString()})`)
+        ? "I could not find a matching product. Open `/products` and try a broader keyword."
+        : `I found: ${top
+            .map((product) => `${product.title} (${formatMoney(product.price)}) -> /products/${product.id}`)
             .join(", ")}.`;
 
     if (!openAiApiKey) {
@@ -72,7 +86,7 @@ export async function POST(request: Request) {
 
     await addCartItem(user.id, product.id, 1);
     return NextResponse.json({
-      reply: `I added ${product.title} to your cart. You can open the cart page to review it.`
+      reply: `I added ${product.title} to your cart. Open /cart to review and checkout.`
     });
   }
 
@@ -95,8 +109,13 @@ export async function POST(request: Request) {
       message: `Hello, I am interested in ${product.title}. ${prompt}`
     });
 
+    const chatParams = new URLSearchParams({
+      productId: product.id,
+      ownerId: product.ownerId
+    });
+
     return NextResponse.json({
-      reply: `I started a chat with the seller about ${product.title}. Open the chat page to continue.`
+      reply: `I started a chat with the seller about ${product.title}. Open /chat?${chatParams.toString()} to continue.`
     });
   }
 
@@ -104,6 +123,7 @@ export async function POST(request: Request) {
     const order = await createOrder({
       userId: user.id,
       userName: user.name,
+      userEmail: user.email,
       location: user.location,
       paymentMethod: prompt.toLowerCase().includes("airtel")
         ? "Airtel Money"
@@ -113,38 +133,74 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      reply: `Your order ${order.id} has been placed. The seller has been notified in their account and on their registered mobile number.`
+      reply: `Your order ${order.id} is placed. Open /orders to track status updates.`
     });
   }
 
   if (openAiApiKey) {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${openAiApiKey}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        input: [
-          {
-            role: "system",
-            content:
-              "You are the ShopNet shopping assistant. Help users search, add to cart, chat, and order products. Be concise."
-          },
-          ...body.messages.map((message) => ({
-            role: message.role,
-            content: message.content
-          }))
-        ]
-      })
-    });
+    const catalog = await getFilteredProducts({});
+    const topCatalog = catalog.slice(0, 12);
+    const [cartItems, wishlistItems, orders] = user
+      ? await Promise.all([
+          getCartItems(user.id),
+          getWishlistItems(user.id),
+          getOrdersForUser(user.id)
+        ])
+      : [[], [], []];
 
-    const data = await response.json();
+    const systemContext = [
+      "ShopNet routes:",
+      "/ (home), /products, /products/[id], /cart, /orders, /chat, /profile, /admin, /admin/dashboard, /assistant",
+      user
+        ? `Current user: ${user.name} (${user.email}), role: ${user.role || "user"}, location: ${user.location}`
+        : "Current user: guest",
+      user
+        ? `User data: cart items=${cartItems.length}, wishlist items=${wishlistItems.length}, orders=${orders.length}`
+        : "Guest limitations: cannot place orders or add to cart until login/signup.",
+      "Top catalog sample:",
+      topCatalog
+        .map((product) => `- ${product.title} | ${product.category} | ${formatMoney(product.price)} | /products/${product.id}`)
+        .join("\n")
+    ].join("\n");
 
-    return NextResponse.json({
-      reply: data.output_text || "I could not complete that request."
-    });
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openAiApiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4.1-mini",
+          input: [
+            {
+              role: "system",
+              content:
+                "You are K.E.E Tech, the ShopNet system assistant. Give practical, smart, app-aware guidance. Use exact route paths when suggesting where to go next. Keep responses concise."
+            },
+            {
+              role: "system",
+              content: `System context:\n${systemContext}`
+            },
+            {
+              role: "user",
+              content: `Conversation:\n${summarizeConversation(body.messages)}\n\nLatest user request: ${prompt}`
+            }
+          ]
+        })
+      });
+
+      const data = await response.json();
+
+      return NextResponse.json({
+        reply: data.output_text || "I could not complete that request."
+      });
+    } catch {
+      return NextResponse.json({
+        reply:
+          "I can still help. Open /products to browse, /cart to checkout, /chat to talk to sellers, or /orders to track purchases."
+      });
+    }
   }
 
   return NextResponse.json({

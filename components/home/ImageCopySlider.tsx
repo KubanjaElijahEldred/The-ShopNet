@@ -5,6 +5,7 @@ import { useEffect, useId, useState } from "react";
 
 type SlideCard = {
   id: string;
+  ownerId?: string;
   title: string;
   image: string;
   price: number;
@@ -113,7 +114,15 @@ export function ImageCopySlider({ slides }: { slides: ImageSlide[] }) {
               </div>
               <div className="image-copy-actions">
                 <Link href={`/products/${card.id}`}>Add to Cart</Link>
-                <Link href={`/chat?productId=${card.id}`} aria-label={`Chat about ${card.title}`}>
+                <Link
+                  href={{
+                    pathname: "/chat",
+                    query: card.ownerId
+                      ? { productId: card.id, ownerId: card.ownerId }
+                      : { productId: card.id }
+                  }}
+                  aria-label={`Chat about ${card.title}`}
+                >
                   💬
                 </Link>
               </div>

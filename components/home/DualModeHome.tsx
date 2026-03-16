@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type HomeProduct = {
   id: string;
+  ownerId: string;
   title: string;
   category: string;
   price: number;
@@ -71,46 +72,7 @@ export function DualModeHome({ products, query, totalMatches, noMatch }: Props) 
   return (
     <div className={`dualmode-home-shell dualmode-home--${theme}`}>
       <section className="dualmode-home-frame">
-        <header className="dualmode-topbar">
-          <Link href="/" className="dualmode-brand">
-            <span className="dualmode-brand-bag">🛍️</span>
-            <strong>The ShopNet</strong>
-          </Link>
 
-          <form action="/" method="get" className="dualmode-search">
-            <input
-              name="q"
-              defaultValue={query || ""}
-              placeholder="Search for Gadgets, Fashion, and more..."
-            />
-            <button type="submit" aria-label="Search">
-              🔍
-            </button>
-          </form>
-
-          <div className="dualmode-top-actions">
-            <span>⚡ Quick delivery</span>
-            <Link href="/products" className="dualmode-shop-now">
-              Shop now
-            </Link>
-            <Link href="/profile" aria-label="Profile">
-              👤
-            </Link>
-            <Link href="/cart" aria-label="Cart">
-              🛒
-            </Link>
-            <Link href="/chat" aria-label="Messages">
-              ✉️
-            </Link>
-            <button
-              type="button"
-              className="dualmode-theme-toggle"
-              onClick={() => setTheme((current) => (current === "sunset" ? "neon" : "sunset"))}
-            >
-              {theme === "sunset" ? "Dark Neon" : "Light Orange"}
-            </button>
-          </div>
-        </header>
 
         <section className="dualmode-hero">
           <div className="dualmode-hero-copy">
@@ -162,7 +124,13 @@ export function DualModeHome({ products, query, totalMatches, noMatch }: Props) 
                   <p>{formatPrice(product.price)}</p>
                   <div className="dualmode-popular-actions">
                     <Link href={`/products/${product.id}`}>Add to Cart</Link>
-                    <Link href={`/chat?productId=${product.id}`} aria-label={`Chat about ${product.title}`}>
+                    <Link
+                      href={{
+                        pathname: "/chat",
+                        query: { productId: product.id, ownerId: product.ownerId }
+                      }}
+                      aria-label={`Chat about ${product.title}`}
+                    >
                       💬
                     </Link>
                   </div>
@@ -196,7 +164,10 @@ export function DualModeHome({ products, query, totalMatches, noMatch }: Props) 
 
         <footer className="dualmode-footer">
           <section>
-            <h3>The ShopNet</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <img src="/image.png" alt="ShopNet Logo" width={32} height={32} style={{ borderRadius: '8px', objectFit: 'contain' }} />
+              <h3 style={{ margin: 0 }}>The ShopNet</h3>
+            </div>
             <p>395 Toors arive Sircle Road, Rosemint, Suite 31130, Acra, Acrara</p>
           </section>
           <section>

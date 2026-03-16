@@ -1,8 +1,12 @@
+import fs from "node:fs";
+import path from "node:path";
+
 type DemoUser = {
   id: string;
   name: string;
   email: string;
   passwordHash: string;
+  role: "user" | "admin";
   location: string;
   mobileNumber?: string;
   profileImage?: string;
@@ -82,6 +86,7 @@ type DemoOrder = {
   id: string;
   userId: string;
   userName: string;
+  userEmail?: string;
   location: string;
   paymentMethod: string;
   status: string;
@@ -107,59 +112,113 @@ type DemoNotification = {
   createdAt: string;
 };
 
+type DemoStore = {
+  users: DemoUser[];
+  products: DemoProduct[];
+  cartItems: DemoCartItem[];
+  chats: DemoChat[];
+  wishlistItems: DemoWishlistItem[];
+  reviews: DemoReview[];
+  orders: DemoOrder[];
+  notifications: DemoNotification[];
+};
+
 declare global {
   // eslint-disable-next-line no-var
-  var shopnetDemoStore:
-    | {
-        users: DemoUser[];
-        products: DemoProduct[];
-        cartItems: DemoCartItem[];
-        chats: DemoChat[];
-        wishlistItems: DemoWishlistItem[];
-        reviews: DemoReview[];
-        orders: DemoOrder[];
-        notifications: DemoNotification[];
-      }
-    | undefined;
+  var shopnetDemoStore: DemoStore | undefined;
 }
 
 function createId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-const initialStore = {
-  users: [] as DemoUser[],
-  products: [
-    {
-      id: createId("prd"),
-      ownerId: "demo_seller",
-      title: "Classic Sneaker",
-      description:
-        "A clean everyday sneaker with front, side, and back photos for confident shopping.",
-      category: "Fashion",
-      price: 85000,
-      size: "42",
-      rating: 4.5,
-      stock: 8,
-      frontImage:
-        "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=900&q=80",
-      sideImage:
-        "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=900&q=80",
-      backImage:
-        "https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?auto=format&fit=crop&w=900&q=80",
-      createdAt: new Date().toISOString()
-    }
-  ],
-  cartItems: [] as DemoCartItem[],
-  chats: [] as DemoChat[],
-  wishlistItems: [] as DemoWishlistItem[],
-  reviews: [] as DemoReview[],
-  orders: [] as DemoOrder[],
-  notifications: [] as DemoNotification[]
+function resolveDemoStorePath() {
+  const envPath = process.env.DEMO_STORE_FILE_PATH?.trim();
+  if (envPath) {
+    return path.isAbsolute(envPath) ? envPath : path.join(process.cwd(), envPath);
+  }
+
+  return path.join(process.cwd(), ".shopnet-demo-store.json");
+}
+
+const demoStorePath = resolveDemoStorePath();
+
+const initialStore: DemoStore = {
+  users: [],
+  products: [],
+  cartItems: [],
+  chats: [],
+  wishlistItems: [],
+  reviews: [],
+  orders: [],
+  notifications: []
 };
 
-export const demoStore = global.shopnetDemoStore || initialStore;
+function cloneInitialStore(): DemoStore {
+  return {
+    users: [],
+    products: [],
+    cartItems: [],
+    chats: [],
+    wishlistItems: [],
+    reviews: [],
+    orders: [],
+    notifications: []
+  };
+}
+
+function normalizeLoadedStore(data: unknown): DemoStore {
+  const incoming = (data || {}) as Partial<DemoStore>;
+  const fallback = cloneInitialStore();
+
+  return {
+    users: Array.isArray(incoming.users) ? incoming.users : fallback.users,
+    products: Array.isArray(incoming.products) ? incoming.products : fallback.products,
+    cartItems: Array.isArray(incoming.cartItems) ? incoming.cartItems : fallback.cartItems,
+    chats: Array.isArray(incoming.chats) ? incoming.chats : fallback.chats,
+    wishlistItems: Array.isArray(incoming.wishlistItems)
+      ? incoming.wishlistItems
+      : fallback.wishlistItems,
+    reviews: Array.isArray(incoming.reviews) ? incoming.reviews : fallback.reviews,
+    orders: Array.isArray(incoming.orders) ? incoming.orders : fallback.orders,
+    notifications: Array.isArray(incoming.notifications)
+      ? incoming.notifications
+      : fallback.notifications
+  };
+}
+
+function loadDemoStoreFromDisk() {
+  try {
+    if (!fs.existsSync(demoStorePath)) {
+      return cloneInitialStore();
+    }
+
+    const raw = fs.readFileSync(demoStorePath, "utf8");
+    if (!raw.trim()) {
+      return cloneInitialStore();
+    }
+
+    return normalizeLoadedStore(JSON.parse(raw));
+  } catch {
+    return cloneInitialStore();
+  }
+}
+
+export const demoStore = global.shopnetDemoStore || loadDemoStoreFromDisk();
 
 global.shopnetDemoStore = demoStore;
+
+export function persistDemoStore() {
+  try {
+    const folderPath = path.dirname(demoStorePath);
+    if (!fs.existsSync(folderPath)) {
+      fs.mkdirSync(folderPath, { recursive: true });
+    }
+
+    fs.writeFileSync(demoStorePath, JSON.stringify(demoStore, null, 2), "utf8");
+  } catch {
+    // Ignore persistence failures; demo store should never crash app flow.
+  }
+}
 
 export { createId };

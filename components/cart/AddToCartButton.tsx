@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function AddToCartButton({ productId }: { productId: string }) {
+export function AddToCartButton({ productId, className }: { productId: string; className?: string }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState("");
   const router = useRouter();
@@ -32,10 +32,10 @@ export function AddToCartButton({ productId }: { productId: string }) {
 
   return (
     <div className="inline-actions">
-      <button className="button" onClick={addToCart} disabled={pending} type="button">
+      <button className={className || "button"} onClick={addToCart} disabled={pending} type="button">
         {pending ? "Adding..." : "Add to cart"}
       </button>
-      {feedback ? <span className="muted">{feedback}</span> : null}
+      {feedback ? <span className="muted" style={{ display: 'block', fontSize: '12px', marginTop: '4px' }}>{feedback}</span> : null}
     </div>
   );
 }

@@ -1,9 +1,11 @@
 .next
+.next-dev
 node_modules
 .env
 .env.local
 dist
 npm-debug.log*
+.shopnet-demo-store.json
 
 # clerk configuration (can include secrets)
 /.clerk/

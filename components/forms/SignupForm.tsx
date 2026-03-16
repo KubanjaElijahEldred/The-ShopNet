@@ -1,8 +1,9 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type ChangeEvent, type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { demoLocations } from "@/lib/constants";
+import { imageFileToDataUrl } from "@/lib/client/image-utils";
 import { passwordRule } from "@/lib/validators";
 
 export function SignupForm() {
@@ -10,6 +11,30 @@ export function SignupForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [pending, setPending] = useState(false);
+  const [profileImageData, setProfileImageData] = useState("");
+
+  async function handleProfilePhotoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setError("");
+
+    try {
+      const compressed = await imageFileToDataUrl(file, {
+        maxDimension: 360,
+        quality: 0.78
+      });
+      setProfileImageData(compressed);
+    } catch (photoError) {
+      const message =
+        photoError instanceof Error
+          ? photoError.message
+          : "Unable to process selected image.";
+      setError(message);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,11 +43,17 @@ export function SignupForm() {
     setSuccess("");
 
     const formData = new FormData(event.currentTarget);
+    const selectedRole = formData.get("role") === "admin" ? "admin" : "user";
+    const payload = Object.fromEntries(formData.entries());
+
+    if (profileImageData) {
+      payload.profileImage = profileImageData;
+    }
 
     const response = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.fromEntries(formData.entries()))
+      body: JSON.stringify(payload)
     });
 
     const data = await response.json();
@@ -33,8 +64,8 @@ export function SignupForm() {
       return;
     }
 
-    setSuccess("Account created successfully. Redirecting to your profile...");
-    router.push("/profile");
+    setSuccess("Account created successfully. Redirecting...");
+    router.push(selectedRole === "admin" ? "/admin/dashboard" : "/profile");
     router.refresh();
   }
 
@@ -62,13 +93,28 @@ export function SignupForm() {
       </label>
 
       <label>
-        Profile image URL (optional)
+        Profile photo (camera or gallery)
         <input
-          name="profileImage"
-          type="url"
-          placeholder="https://example.com/profile-photo.jpg"
+          type="file"
+          accept="image/*"
+          capture="user"
+          onChange={handleProfilePhotoChange}
         />
       </label>
+
+      {profileImageData ? (
+        <img
+          src={profileImageData}
+          alt="Profile preview"
+          style={{
+            width: "76px",
+            height: "76px",
+            borderRadius: "999px",
+            objectFit: "cover",
+            border: "2px solid rgba(20, 35, 60, 0.12)"
+          }}
+        />
+      ) : null}
 
       <label>
         Shipping address (optional)
@@ -90,6 +136,14 @@ export function SignupForm() {
               {location}
             </option>
           ))}
+        </select>
+      </label>
+
+      <label>
+        Account type
+        <select name="role" defaultValue="user">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
         </select>
       </label>
 

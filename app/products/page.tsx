@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AddProductForm } from "@/components/forms/AddProductForm";
+import { ProductOwnerControls } from "@/components/products/ProductOwnerControls";
 import { getFilteredProducts, getReviewSummaryMap } from "@/lib/data";
 import { categories, sortOptions } from "@/lib/constants";
 import { getSessionUser } from "@/lib/session";
@@ -15,12 +16,39 @@ export default async function ProductsPage({
 }) {
   const user = await getSessionUser();
   const params = await searchParams;
-  const products = await getFilteredProducts({
-    query: params?.q,
-    category: params?.category,
-    sortBy: params?.sort
-  });
-  const reviewMap = await getReviewSummaryMap();
+  let products: Awaited<ReturnType<typeof getFilteredProducts>> = [];
+  let reviewMap: Awaited<ReturnType<typeof getReviewSummaryMap>> = new Map();
+
+  try {
+    [products, reviewMap] = await Promise.all([
+      getFilteredProducts({
+        query: params?.q,
+        category: params?.category,
+        sortBy: params?.sort
+      }),
+      getReviewSummaryMap()
+    ]);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to load products right now.";
+
+    return (
+      <div className="stack-page">
+        <section className="stack-card">
+          <span className="eyebrow">Database</span>
+          <h1>Unable to load marketplace products</h1>
+          <p className="muted">
+            ShopNet could not reach MongoDB. Verify Atlas network access and your
+            connection string, then try again.
+          </p>
+          <p className="muted">{message}</p>
+          <Link href="/" className="button button-secondary">
+            Back home
+          </Link>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="stack-page">
@@ -76,6 +104,9 @@ export default async function ProductsPage({
       <section className="product-catalog-grid">
         {products.map((product) => {
           const summary = reviewMap.get(product.id);
+          const canManage = user
+            ? product.ownerId === user.id || user.role === "admin"
+            : false;
 
           return (
             <article key={product.id} className="catalog-card">
@@ -100,16 +131,24 @@ export default async function ProductsPage({
                 </div>
                 <div className="catalog-footer">
                   <Link className="product-card-button" href={`/products/${product.id}`}>
-                    Add to Cart
+                    View Product
                   </Link>
                   <Link
                     className="product-card-icon product-card-chat-trigger"
-                    href={`/chat?productId=${product.id}`}
+                    href={{
+                      pathname: "/chat",
+                      query: { productId: product.id, ownerId: product.ownerId }
+                    }}
                     aria-label={`Chat about ${product.title}`}
                   >
                     💬
                   </Link>
                 </div>
+                {canManage ? (
+                  <div style={{ marginTop: "10px" }}>
+                    <ProductOwnerControls productId={product.id} showViewLink={false} />
+                  </div>
+                ) : null}
               </div>
             </article>
           );
