@@ -7,7 +7,7 @@
     "dev:3002": "next dev --webpack --hostname 0.0.0.0 --port 3002",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@clerk/nextjs": "^6.12.0",

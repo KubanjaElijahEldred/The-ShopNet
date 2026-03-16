@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { cookies } from "next/headers";
 import { currentUser } from "@clerk/nextjs/server";
+import { hasClerkKeys } from "@/lib/clerk-config";
 
 const SESSION_COOKIE = "shopnet_session";
 
@@ -39,6 +40,21 @@ export async function clearSessionCookie() {
 }
 
 export async function getSessionUser() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+
+  if (token) {
+    try {
+      return jwt.verify(token, getSecret()) as SessionUser;
+    } catch {
+      // Fall through to Clerk lookup when the legacy JWT cookie is missing or invalid.
+    }
+  }
+
+  if (!hasClerkKeys) {
+    return null;
+  }
+
   try {
     const clerkUser = await currentUser();
 
@@ -57,16 +73,5 @@ export async function getSessionUser() {
     // If Clerk is not fully configured yet, keep legacy JWT auth working.
   }
 
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-
-  if (!token) {
-    return null;
-  }
-
-  try {
-    return jwt.verify(token, getSecret()) as SessionUser;
-  } catch {
-    return null;
-  }
+  return null;
 }

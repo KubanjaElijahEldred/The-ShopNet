@@ -7,7 +7,7 @@ export function SplashScreen() {
 
   useEffect(() => {
     function hideSplash() {
-      window.setTimeout(() => setVisible(false), 120);
+      window.setTimeout(() => setVisible(false), 24);
     }
 
     if (document.readyState === "loading") {
@@ -16,7 +16,7 @@ export function SplashScreen() {
       hideSplash();
     }
 
-    const fallback = window.setTimeout(() => setVisible(false), 900);
+    const fallback = window.setTimeout(() => setVisible(false), 220);
 
     return () => {
       document.removeEventListener("DOMContentLoaded", hideSplash);

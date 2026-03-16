@@ -63,7 +63,7 @@ export function AssistantClient() {
         <span className="eyebrow">ShopNet AI</span>
         <h1>Shopping assistant</h1>
         <div className="assistant-thread">
-          {messages.map((message, index) => (
+          {messages.map((message) => (
             <div
               key={message.id}
               className={message.role === "user" ? "message-bubble mine" : "message-bubble"}
@@ -78,8 +78,9 @@ export function AssistantClient() {
       <form className="stack-card" onSubmit={handleSubmit}>
         <span className="eyebrow">Ask for help</span>
         <p className="muted">
-          Try: "Find sneakers under 100000", "Add the classic sneaker to my cart",
-          "Message the seller about size", or "Place my order with Airtel Money".
+          Try: &quot;Find sneakers under 100000&quot;, &quot;Add the classic sneaker to my
+          cart&quot;, &quot;Message the seller about size&quot;, or &quot;Place my order with
+          Airtel Money&quot;.
         </p>
         <textarea
           value={input}

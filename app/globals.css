@@ -64,7 +64,7 @@ textarea {
     linear-gradient(180deg, #0f1f39 0%, #172845 48%, #0c1425 100%);
   opacity: 1;
   visibility: visible;
-  transition: opacity 0.45s ease, visibility 0.45s ease;
+  transition: opacity 0.18s ease, visibility 0.18s ease;
 }
 
 .app-splash.hide {
@@ -3946,6 +3946,13 @@ textarea {
   font-weight: 600;
 }
 
+.unified-helper {
+  margin: -4px 0 0;
+  color: #7a644e;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .unified-submit-btn {
   margin-top: 8px;
   padding: 15px;
@@ -3968,6 +3975,15 @@ textarea {
 
 .unified-submit-btn:active {
   transform: translateY(0);
+}
+
+.unified-google-button {
+  width: 100%;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .unified-social-divider {

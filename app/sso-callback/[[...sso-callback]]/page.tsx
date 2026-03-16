@@ -8,7 +8,7 @@ export default function SsoCallbackPage() {
       <section className="stack-card">
         <h1>Google sign-in is not configured yet</h1>
         <p className="muted">
-          Add Clerk API keys in <code>.env.local</code> to enable Continue with Google.
+          Add Clerk API keys in <code>.env.local</code> and restart <code>npm run dev</code>.
         </p>
         <Link href="/signup" className="button">
           Go to Sign Up

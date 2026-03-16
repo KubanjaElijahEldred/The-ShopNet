@@ -108,7 +108,6 @@ type DemoNotification = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var shopnetDemoStore:
     | {
         users: DemoUser[];

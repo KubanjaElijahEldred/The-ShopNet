@@ -6,18 +6,43 @@ import Image from "next/image";
 import { demoLocations } from "@/lib/constants";
 import { passwordRule } from "@/lib/validators";
 import { GoogleIcon, AppleIcon, FacebookIcon, TwitterIcon } from "./AuthIcons";
+import { GoogleOAuthButton } from "./GoogleOAuthButton";
 
-export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "signin" | "signup" }) {
+type Mode = "signin" | "signup";
+
+export function UnifiedAuthForm({
+  initialMode = "signin",
+  clerkEnabled = false
+}: {
+  initialMode?: Mode;
+  clerkEnabled?: boolean;
+}) {
   const router = useRouter();
-  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [pending, setPending] = useState(false);
+
+  function getErrorMessage(value: unknown) {
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed) && parsed[0]?.message) {
+          return parsed[0].message as string;
+        }
+      } catch {
+        return value;
+      }
+    }
+
+    return "Something went wrong.";
+  }
 
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError("");
+    setSuccess("");
 
     const formData = new FormData(event.currentTarget);
 
@@ -31,7 +56,7 @@ export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "sig
     setPending(false);
 
     if (!response.ok) {
-      setError(data.error || "Unable to sign in.");
+      setError(getErrorMessage(data.error) || "Unable to sign in.");
       return;
     }
 
@@ -69,12 +94,12 @@ export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "sig
     setPending(false);
 
     if (!response.ok) {
-      setError(data.error || "Unable to create account.");
+      setError(getErrorMessage(data.error) || "Unable to create account.");
       return;
     }
 
-    setSuccess("Account created successfully!");
-    setMode("signin");
+    router.push("/profile");
+    router.refresh();
   }
 
   return (
@@ -132,6 +157,27 @@ export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "sig
                 <button type="submit" disabled={pending} className="unified-submit-btn">
                   {pending ? "Signing in..." : "Sign in"}
                 </button>
+
+                {clerkEnabled ? (
+                  <GoogleOAuthButton
+                    mode="signin"
+                    className="auth-google-button unified-google-button"
+                    onError={setError}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="auth-google-button unified-google-button"
+                    onClick={() =>
+                      setError(
+                        "Continue with Google is not configured yet. Restart the dev server after adding Clerk keys."
+                      )
+                    }
+                  >
+                    <GoogleIcon />
+                    <span>Continue with Google</span>
+                  </button>
+                )}
               </form>
 
             </div>
@@ -154,6 +200,7 @@ export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "sig
                   <input type="password" name="password" placeholder="Enter Password" required />
                   <label>Password</label>
                 </div>
+                <p className="unified-helper">{passwordRule}</p>
 
                 <div className="unified-checkbox-group">
                   <input type="checkbox" id="terms" required />
@@ -165,6 +212,27 @@ export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "sig
                 <button type="submit" disabled={pending} className="unified-submit-btn">
                   {pending ? "Signing up..." : "Sign up"}
                 </button>
+
+                {clerkEnabled ? (
+                  <GoogleOAuthButton
+                    mode="signup"
+                    className="auth-google-button unified-google-button"
+                    onError={setError}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="auth-google-button unified-google-button"
+                    onClick={() =>
+                      setError(
+                        "Continue with Google is not configured yet. Restart the dev server after adding Clerk keys."
+                      )
+                    }
+                  >
+                    <GoogleIcon />
+                    <span>Continue with Google</span>
+                  </button>
+                )}
               </form>
 
               <div className="unified-social-divider">
@@ -174,7 +242,24 @@ export function UnifiedAuthForm({ initialMode = "signin" }: { initialMode?: "sig
               <div className="unified-social-icons">
                  <button type="button"><FacebookIcon /></button>
                  <button type="button"><TwitterIcon /></button>
-                 <button type="button"><GoogleIcon /></button>
+                 {clerkEnabled ? (
+                   <GoogleOAuthButton
+                     mode="signup"
+                     iconOnly
+                     onError={setError}
+                   />
+                 ) : (
+                   <button
+                     type="button"
+                     onClick={() =>
+                       setError(
+                         "Continue with Google is not configured yet. Restart the dev server after adding Clerk keys."
+                       )
+                     }
+                   >
+                     <GoogleIcon />
+                   </button>
+                 )}
                  <button type="button"><AppleIcon /></button>
               </div>
 

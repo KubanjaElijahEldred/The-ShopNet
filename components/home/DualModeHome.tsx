@@ -47,24 +47,25 @@ function formatPrice(ugxPrice: number) {
   return `$${Math.max(1, Math.round(ugxPrice / 3700))}`;
 }
 
+function readSavedTheme() {
+  if (typeof window === "undefined") {
+    return "sunset" as const;
+  }
+
+  const savedTheme = window.localStorage.getItem("shopnet-home-theme");
+
+  return savedTheme === "neon" || savedTheme === "sunset" ? savedTheme : "sunset";
+}
+
 export function DualModeHome({ products, query, totalMatches, noMatch }: Props) {
-  const [theme, setTheme] = useState<"sunset" | "neon">("sunset");
-  const activeProducts = products.length ? products : [];
-
-  useEffect(() => {
-    const savedTheme = window.localStorage.getItem("shopnet-home-theme");
-
-    if (savedTheme === "neon" || savedTheme === "sunset") {
-      setTheme(savedTheme);
-    }
-  }, []);
+  const [theme, setTheme] = useState<"sunset" | "neon">(readSavedTheme);
+  const activeProducts = products;
 
   useEffect(() => {
     window.localStorage.setItem("shopnet-home-theme", theme);
   }, [theme]);
 
   const heroProducts = useMemo(() => pickWithWrap(activeProducts, 4, 0), [activeProducts]);
-  const hotDeals = useMemo(() => pickWithWrap(activeProducts, 4, 2), [activeProducts]);
   const popularProducts = useMemo(() => pickWithWrap(activeProducts, 5, 6), [activeProducts]);
   const needProducts = useMemo(() => pickWithWrap(activeProducts, 5, 10), [activeProducts]);
 
@@ -230,7 +231,10 @@ export function DualModeHome({ products, query, totalMatches, noMatch }: Props) 
 
       {noMatch ? (
         <section className="dualmode-no-match">
-          <p>No exact products found for "{query}". Showing close matches from your catalog.</p>
+          <p>
+            No exact products found for &quot;{query}&quot;. Showing close matches from your
+            catalog.
+          </p>
         </section>
       ) : null}
     </div>

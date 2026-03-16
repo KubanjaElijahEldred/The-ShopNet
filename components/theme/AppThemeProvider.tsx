@@ -49,29 +49,25 @@ function readStoredTheme(): AppTheme | null {
   return null;
 }
 
+function getInitialTheme() {
+  if (typeof window === "undefined") {
+    return DEFAULT_THEME;
+  }
+
+  return readStoredTheme() || DEFAULT_THEME;
+}
+
 export function AppThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<AppTheme>(DEFAULT_THEME);
-  const [ready, setReady] = useState(false);
+  const [theme, setTheme] = useState<AppTheme>(getInitialTheme);
 
   useEffect(() => {
-    const storedTheme = readStoredTheme() || DEFAULT_THEME;
-    setTheme(storedTheme);
-    applyTheme(storedTheme);
-    setReady(true);
-  }, []);
-
-  useEffect(() => {
-    if (!ready) {
-      return;
-    }
-
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
     window.localStorage.setItem(
       LEGACY_THEME_STORAGE_KEY,
       theme === "dark" ? "neon" : "sunset"
     );
     applyTheme(theme);
-  }, [ready, theme]);
+  }, [theme]);
 
   const value = useMemo<ThemeContextValue>(
     () => ({

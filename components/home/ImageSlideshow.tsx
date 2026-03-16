@@ -1,7 +1,5 @@
 "use client";
 
-import { useState, useEffect } from "react";
-
 const images = [
   "/image-copy-1.png",
   "/image-copy-2.png",

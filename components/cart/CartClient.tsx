@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { paymentMethods, demoLocations } from "@/lib/constants";
 import { calculateCartTotals } from "@/lib/pricing";
 import { CheckoutButton } from "@/components/cart/CheckoutButton";
@@ -27,15 +27,9 @@ export function CartClient({
   defaultLocation?: string;
   defaultAddress?: string;
 }) {
-  const [location, setLocation] = useState(defaultLocation || "Kampala");
+  const [location, setLocation] = useState(() => defaultLocation || "Kampala");
   const [paymentMethod, setPaymentMethod] = useState("Cash on Delivery");
   const [couponCode, setCouponCode] = useState("");
-
-  useEffect(() => {
-    if (defaultLocation) {
-      setLocation(defaultLocation);
-    }
-  }, [defaultLocation]);
 
   const subtotal = useMemo(
     () =>
