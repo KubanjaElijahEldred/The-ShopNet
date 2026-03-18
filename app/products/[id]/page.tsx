@@ -167,6 +167,7 @@ export default async function ProductDetailPage({
             <ChatForm
               user={user ? { id: user.id, name: user.name, email: user.email } : null}
               defaultProductId={product.id}
+              ownerId={product.ownerId}
               recipientId={product.ownerId}
               title="Ask about this product"
               submitLabel="Send to owner"

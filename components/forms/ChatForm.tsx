@@ -13,6 +13,7 @@ export type ChatFormProps = {
     | null;
   defaultProductId?: string;
   conversationId?: string;
+  ownerId?: string;
   recipientId?: string;
   participantEmail?: string;
   guestEmail?: string;
@@ -25,6 +26,7 @@ export const ChatForm = ({
   user,
   defaultProductId,
   conversationId,
+  ownerId,
   recipientId,
   participantEmail,
   guestEmail,
@@ -155,6 +157,7 @@ export const ChatForm = ({
       {conversationId ? (
         <input type="hidden" name="conversationId" value={conversationId} />
       ) : null}
+      {ownerId ? <input type="hidden" name="ownerId" value={ownerId} /> : null}
 
       {recipientId ? <input type="hidden" name="recipientId" value={recipientId} /> : null}
       {participantEmail ? (

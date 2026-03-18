@@ -27,10 +27,11 @@ export async function POST(request: Request) {
     const productOwnerId =
       data.productId &&
       products.find((product) => product.id === data.productId)?.ownerId;
+    const conversationOwnerId = data.ownerId || productOwnerId || user?.id;
 
     if (user) {
-      const ownerId = data.recipientId || productOwnerId || user.id;
-      const participantId = ownerId === user.id ? undefined : user.id;
+      const ownerId = conversationOwnerId || user.id;
+      const participantId = ownerId === user.id ? data.recipientId : user.id;
 
       const message = await createChatMessage({
         conversationId: data.conversationId,
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
 
     const message = await createChatMessage({
       conversationId: data.conversationId,
-      ownerId: productOwnerId || "demo_seller",
+      ownerId: conversationOwnerId || "demo_seller",
       participantEmail: data.participantEmail || data.guestEmail.toLowerCase(),
       senderName: data.guestName,
       senderEmail: data.guestEmail.toLowerCase(),

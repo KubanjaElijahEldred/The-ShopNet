@@ -7,8 +7,9 @@ const UserSchema = new Schema(
     passwordHash: { type: String, required: true },
     location: { type: String, required: true },
     mobileNumber: { type: String },
-    profileImage: { type: String },
-    shippingAddress: { type: String }
+    profileImage: { type: String, required: true },
+    shippingAddress: { type: String },
+    role: { type: String, enum: ["customer", "admin"], default: "customer", index: true }
   },
   { timestamps: true }
 );

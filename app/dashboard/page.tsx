@@ -20,7 +20,11 @@ export default async function DashboardPage() {
   const user = await getSessionUser();
 
   if (!user) {
-    redirect("/login");
+    redirect("/auth");
+  }
+
+  if (user.role === "admin") {
+    redirect("/admin");
   }
 
   const dashboard = await getSellerDashboard(user.id);

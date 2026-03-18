@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { SplashScreen } from "@/components/SplashScreen";
-import { AppNav } from "@/components/AppNav";
+import { NavBar } from "@/components/NavBar";
+import { DraggableAssistantButton } from "@/components/assistant/DraggableAssistantButton";
+import { getSessionUser } from "@/lib/session";
 import { clerkPublishableKey, hasClerkKeys } from "@/lib/clerk-config";
 
 export const metadata: Metadata = {
@@ -11,16 +13,19 @@ export const metadata: Metadata = {
   description: "An ecommerce web app for shopping, selling, chat, and smart checkout."
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{
   children: ReactNode;
 }>) {
+  const user = await getSessionUser();
+  
   const shell = (
     <>
       <SplashScreen />
-      <AppNav />
+      <NavBar user={user} />
       <main className="page-shell">{children}</main>
+      <DraggableAssistantButton />
     </>
   );
 

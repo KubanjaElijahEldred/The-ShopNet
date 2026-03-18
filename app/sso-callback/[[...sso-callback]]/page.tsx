@@ -10,8 +10,8 @@ export default function SsoCallbackPage() {
         <p className="muted">
           Add Clerk API keys in <code>.env.local</code> and restart <code>npm run dev</code>.
         </p>
-        <Link href="/signup" className="button">
-          Go to Sign Up
+        <Link href="/auth" className="button">
+          Go to Auth
         </Link>
       </section>
     );

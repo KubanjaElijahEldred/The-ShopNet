@@ -15,7 +15,7 @@ export default async function OrdersPage() {
   const user = await getSessionUser();
 
   if (!user) {
-    redirect("/login");
+    redirect("/auth");
   }
 
   const orders = await getOrdersForUser(user.id);

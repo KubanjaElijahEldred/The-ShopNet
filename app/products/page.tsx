@@ -1,6 +1,11 @@
 import Link from "next/link";
-import { AddProductForm } from "@/components/forms/AddProductForm";
-import { getFilteredProducts, getReviewSummaryMap } from "@/lib/data";
+import { ProductCrudPanel } from "@/components/products/ProductCrudPanel";
+import {
+  getFilteredProducts,
+  getProducts,
+  getReviewSummaryMap,
+  getUserPublicProfiles
+} from "@/lib/data";
 import { categories, sortOptions } from "@/lib/constants";
 import { getSessionUser } from "@/lib/session";
 
@@ -15,12 +20,25 @@ export default async function ProductsPage({
 }) {
   const user = await getSessionUser();
   const params = await searchParams;
-  const products = await getFilteredProducts({
-    query: params?.q,
-    category: params?.category,
-    sortBy: params?.sort
-  });
-  const reviewMap = await getReviewSummaryMap();
+  const [products, allProducts, reviewMap, ownerProfiles] = await Promise.all([
+    getFilteredProducts({
+      query: params?.q,
+      category: params?.category,
+      sortBy: params?.sort
+    }),
+    getProducts(),
+    getReviewSummaryMap(),
+    getUserPublicProfiles()
+  ]);
+  const ownerMap = new Map(ownerProfiles.map((profile) => [profile.id, profile.name]));
+  const managedProducts = user
+    ? allProducts
+        .filter((product) => user.role === "admin" || product.ownerId === user.id)
+        .map((product) => ({
+          ...product,
+          ownerName: ownerMap.get(product.ownerId)
+        }))
+    : [];
 
   return (
     <div className="stack-page">
@@ -71,7 +89,18 @@ export default async function ProductsPage({
         </button>
       </form>
 
-      {user ? <AddProductForm /> : null}
+      {user ? (
+        <ProductCrudPanel
+          products={managedProducts}
+          title={user.role === "admin" ? "Admin product tools" : "Your products"}
+          description={
+            user.role === "admin"
+              ? "Add, edit, or delete any product from one dashboard."
+              : "Create products and update or remove the ones you already listed."
+          }
+          canManageAll={user.role === "admin"}
+        />
+      ) : null}
 
       <section className="product-catalog-grid">
         {products.map((product) => {

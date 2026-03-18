@@ -20,6 +20,8 @@ type SignupInput = {
   mobileNumber?: string;
   profileImage?: string;
   shippingAddress?: string;
+  role?: "customer" | "admin";
+  adminPassword?: string;
 };
 
 type ProductInput = {
@@ -35,6 +37,8 @@ type ProductInput = {
   sideImage: string;
   backImage: string;
 };
+
+type ProductUpdateInput = Omit<ProductInput, "ownerId">;
 
 type ChatInput = {
   conversationId?: string;
@@ -138,8 +142,18 @@ function sortProducts<T extends { price: number; rating: number; createdAt?: str
   );
 }
 
+function getAdminSignupPassword() {
+  return process.env.ADMIN_SIGNUP_PASSWORD || "Eldred2037";
+}
+
 export async function createUser(input: SignupInput) {
   const passwordHash = await bcrypt.hash(input.password, 10);
+
+  if (input.role === "admin") {
+    if (input.adminPassword !== getAdminSignupPassword()) {
+      throw new Error("Invalid admin password.");
+    }
+  }
 
   if (dbEnabled) {
     await connectToDatabase();
@@ -156,7 +170,8 @@ export async function createUser(input: SignupInput) {
       location: input.location,
       mobileNumber: input.mobileNumber || undefined,
       profileImage: input.profileImage || undefined,
-      shippingAddress: input.shippingAddress || undefined
+      shippingAddress: input.shippingAddress || undefined,
+      role: input.role || "customer"
     });
 
     return {
@@ -166,7 +181,8 @@ export async function createUser(input: SignupInput) {
       location: user.location,
       mobileNumber: user.mobileNumber,
       profileImage: user.profileImage,
-      shippingAddress: user.shippingAddress
+      shippingAddress: user.shippingAddress,
+      role: user.role
     };
   }
 
@@ -186,7 +202,8 @@ export async function createUser(input: SignupInput) {
     location: input.location,
     mobileNumber: input.mobileNumber || undefined,
     profileImage: input.profileImage || undefined,
-    shippingAddress: input.shippingAddress || undefined
+    shippingAddress: input.shippingAddress || undefined,
+    role: input.role || "customer"
   };
 
   demoStore.users.push(user);
@@ -198,7 +215,8 @@ export async function createUser(input: SignupInput) {
     location: user.location,
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
-    shippingAddress: user.shippingAddress
+    shippingAddress: user.shippingAddress,
+    role: user.role
   };
 }
 
@@ -216,15 +234,16 @@ export async function authenticateUser(email: string, password: string) {
       return null;
     }
 
-    return {
-      id: stringifyId(user._id),
-      name: user.name,
-      email: user.email,
-      location: user.location,
-      mobileNumber: user.mobileNumber,
-      profileImage: user.profileImage,
-      shippingAddress: user.shippingAddress
-    };
+      return {
+        id: stringifyId(user._id),
+        name: user.name,
+        email: user.email,
+        location: user.location,
+        mobileNumber: user.mobileNumber,
+        profileImage: user.profileImage,
+        shippingAddress: user.shippingAddress,
+        role: user.role
+      };
   }
 
   const user = demoStore.users.find(
@@ -247,7 +266,8 @@ export async function authenticateUser(email: string, password: string) {
     location: user.location,
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
-    shippingAddress: user.shippingAddress
+    shippingAddress: user.shippingAddress,
+    role: user.role
   };
 }
 
@@ -282,7 +302,8 @@ export async function updateUserProfile(
       location: user.location,
       mobileNumber: user.mobileNumber,
       profileImage: user.profileImage,
-      shippingAddress: user.shippingAddress
+      shippingAddress: user.shippingAddress,
+      role: user.role
     };
   }
 
@@ -301,7 +322,8 @@ export async function updateUserProfile(
     location: user.location,
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
-    shippingAddress: user.shippingAddress
+    shippingAddress: user.shippingAddress,
+    role: user.role
   };
 }
 
@@ -317,7 +339,8 @@ export async function getUserPublicProfiles() {
         location: user.location,
         mobileNumber: user.mobileNumber,
         profileImage: user.profileImage,
-        shippingAddress: user.shippingAddress
+        shippingAddress: user.shippingAddress,
+        role: user.role
       }));
     } catch (error) {
       console.error(
@@ -334,7 +357,8 @@ export async function getUserPublicProfiles() {
     location: user.location,
     mobileNumber: user.mobileNumber,
     profileImage: user.profileImage,
-    shippingAddress: user.shippingAddress
+    shippingAddress: user.shippingAddress,
+    role: user.role
   }));
 }
 
@@ -402,6 +426,62 @@ export async function getNotificationsForUser(userId: string) {
   return [...demoStore.notifications]
     .filter((notification) => notification.userId === userId)
     .reverse();
+}
+
+export async function getUnreadNotificationCount(
+  userId: string,
+  channel?: string
+): Promise<number> {
+  if (dbEnabled) {
+    try {
+      await connectToDatabase();
+      const count = await Notification.countDocuments({
+        userId,
+        status: "unread",
+        ...(channel ? { channel } : {})
+      });
+      return count;
+    } catch (error) {
+      console.error(
+        "MongoDB read failed in getUnreadNotificationCount; falling back to demo data.",
+        error
+      );
+    }
+  }
+
+  return demoStore.notifications.filter(
+    (notification) =>
+      notification.userId === userId &&
+      notification.status === "unread" &&
+      (!channel || notification.channel === channel)
+  ).length;
+}
+
+export async function markNotificationsRead(userId: string, channel?: string) {
+  if (dbEnabled) {
+    await connectToDatabase();
+    await Notification.updateMany(
+      {
+        userId,
+        status: "unread",
+        ...(channel ? { channel } : {})
+      },
+      {
+        status: "read"
+      }
+    );
+    return;
+  }
+
+  for (const notification of demoStore.notifications) {
+    if (
+      notification.userId === userId &&
+      notification.status === "unread" &&
+      (!channel || notification.channel === channel)
+    ) {
+      notification.status = "read";
+    }
+  }
 }
 
 export async function getProducts() {
@@ -474,6 +554,103 @@ export async function createProduct(input: ProductInput) {
 
   demoStore.products.push(product);
   return product;
+}
+
+export async function updateProduct(
+  productId: string,
+  userId: string,
+  input: ProductUpdateInput,
+  isAdmin = false
+) {
+  if (dbEnabled) {
+    await connectToDatabase();
+    const existing = await Product.findById(productId);
+
+    if (!existing) {
+      throw new Error("Product not found.");
+    }
+
+    if (!isAdmin && existing.ownerId !== userId) {
+      throw new Error("You cannot edit this product.");
+    }
+
+    existing.title = input.title;
+    existing.description = input.description;
+    existing.category = input.category;
+    existing.price = input.price;
+    existing.size = input.size;
+    existing.rating = input.rating;
+    existing.stock = input.stock;
+    existing.frontImage = input.frontImage;
+    existing.sideImage = input.sideImage;
+    existing.backImage = input.backImage;
+    await existing.save();
+
+    return {
+      id: stringifyId(existing._id),
+      ownerId: existing.ownerId,
+      title: existing.title,
+      description: existing.description,
+      category: existing.category,
+      price: existing.price,
+      size: existing.size,
+      rating: existing.rating,
+      stock: existing.stock,
+      frontImage: existing.frontImage,
+      sideImage: existing.sideImage,
+      backImage: existing.backImage,
+      createdAt: existing.createdAt?.toString?.() || ""
+    };
+  }
+
+  const product = demoStore.products.find((item) => item.id === productId);
+
+  if (!product) {
+    throw new Error("Product not found.");
+  }
+
+  if (!isAdmin && product.ownerId !== userId) {
+    throw new Error("You cannot edit this product.");
+  }
+
+  Object.assign(product, input);
+  return product;
+}
+
+export async function deleteProduct(productId: string, userId: string, isAdmin = false) {
+  if (dbEnabled) {
+    await connectToDatabase();
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      throw new Error("Product not found.");
+    }
+
+    if (!isAdmin && product.ownerId !== userId) {
+      throw new Error("You cannot delete this product.");
+    }
+
+    await Product.deleteOne({ _id: productId });
+    await WishlistItem.deleteMany({ productId });
+    await CartItem.deleteMany({ productId });
+    return;
+  }
+
+  const product = demoStore.products.find((item) => item.id === productId);
+
+  if (!product) {
+    throw new Error("Product not found.");
+  }
+
+  if (!isAdmin && product.ownerId !== userId) {
+    throw new Error("You cannot delete this product.");
+  }
+
+  demoStore.products = demoStore.products.filter((item) => item.id !== productId);
+  demoStore.wishlistItems = demoStore.wishlistItems.filter(
+    (item) => item.productId !== productId
+  );
+  demoStore.cartItems = demoStore.cartItems.filter((item) => item.productId !== productId);
 }
 
 export async function addCartItem(userId: string, productId: string, quantity: number) {
@@ -982,7 +1159,11 @@ export async function updateOrderStatus(
 }
 
 export async function getAdminOverview() {
-  const [users, products] = await Promise.all([getUserPublicProfiles(), getProducts()]);
+  const [users, products, recentMessages] = await Promise.all([
+    getUserPublicProfiles(),
+    getProducts(),
+    getChatMessagesForUser()
+  ]);
   let orders = [...demoStore.orders].reverse().map((order) => ({
     id: order.id,
     userName: order.userName,
@@ -991,6 +1172,7 @@ export async function getAdminOverview() {
     createdAt: order.createdAt
   }));
   let notificationCount = demoStore.notifications.length;
+  let messageCount = demoStore.chats.length;
 
   if (dbEnabled) {
     try {
@@ -1008,6 +1190,7 @@ export async function getAdminOverview() {
         createdAt: order.createdAt?.toString?.() || ""
       }));
       notificationCount = count;
+      messageCount = await ChatMessage.countDocuments();
     } catch (error) {
       console.error(
         "MongoDB read failed in getAdminOverview; falling back to demo data.",
@@ -1021,9 +1204,11 @@ export async function getAdminOverview() {
     productCount: products.length,
     orderCount: orders.length,
     notificationCount,
+    messageCount,
     totalRevenue: orders.reduce((sum, order) => sum + order.total, 0),
     recentOrders: orders.slice(0, 10),
     recentProducts: products.slice(0, 10),
+    recentMessages: recentMessages.slice(0, 10),
     users: users.slice(0, 10)
   };
 }
@@ -1060,6 +1245,8 @@ export async function getSellerDashboard(ownerId: string) {
 
 export async function createChatMessage(input: ChatInput) {
   const conversationId = input.conversationId || createId("cnv");
+  const recipientUserId =
+    input.senderId === input.ownerId ? input.participantId : input.ownerId;
 
   if (dbEnabled) {
     await connectToDatabase();
@@ -1067,13 +1254,25 @@ export async function createChatMessage(input: ChatInput) {
       ...input,
       conversationId
     });
-    return {
+    const result = {
       id: stringifyId(message._id),
       conversationId,
       ...input,
       location: input.location,
       createdAt: message.createdAt?.toString?.() || new Date().toISOString()
     };
+
+    if (recipientUserId && recipientUserId !== input.senderId) {
+      await createNotification({
+        userId: recipientUserId,
+        title: "New message",
+        body: `${input.senderName}: ${input.message.slice(0, 80)}`,
+        channel: "chat",
+        relatedProductId: input.productId
+      });
+    }
+
+    return result;
   }
 
   const message = {
@@ -1084,6 +1283,17 @@ export async function createChatMessage(input: ChatInput) {
   };
 
   demoStore.chats.push(message);
+
+  if (recipientUserId && recipientUserId !== input.senderId) {
+    await createNotification({
+      userId: recipientUserId,
+      title: "New message",
+      body: `${input.senderName}: ${input.message.slice(0, 80)}`,
+      channel: "chat",
+      relatedProductId: input.productId
+    });
+  }
+
   return message;
 }
 

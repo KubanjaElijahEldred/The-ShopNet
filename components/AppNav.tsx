@@ -13,9 +13,7 @@ export function AppNav() {
   const [user, setUser] = useState<NavUser>(null);
 
   useEffect(() => {
-    if (pathname === "/") {
-      return;
-    }
+  // Fetch user session data for navigation bar
 
     const controller = new AbortController();
 
@@ -46,10 +44,6 @@ export function AppNav() {
 
     return () => controller.abort();
   }, [pathname]);
-
-  if (pathname === "/") {
-    return null;
-  }
 
   return <NavBar user={user} />;
 }

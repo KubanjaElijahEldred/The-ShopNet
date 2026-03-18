@@ -1,11 +1,14 @@
-import { ChatForm } from "@/components/forms/ChatForm";
+import { ChatLayout } from "@/components/chat/ChatLayout";
 import {
   getChatMessagesForGuest,
-  getChatMessagesForUser
+  getChatMessagesForUser,
+  getProducts,
+  getUserPublicProfiles,
+  markNotificationsRead
 } from "@/lib/data";
 import { getSessionUser } from "@/lib/session";
 
-type Message = {
+export type Message = {
   id: string;
   conversationId: string;
   ownerId: string;
@@ -26,6 +29,49 @@ type Message = {
   createdAt: string;
 };
 
+type StarterChat = {
+  conversationId: string;
+  recipientId: string;
+  productId: string;
+  peerName: string;
+  peerEmail?: string;
+  peerProfileImage?: string;
+};
+
+function findMatchingThread(
+  threads: Message[][],
+  starterChat: StarterChat | null,
+  userId?: string,
+  guestEmail?: string
+) {
+  if (!starterChat) {
+    return null;
+  }
+
+  return (
+    threads.find((thread) =>
+      thread.some((message) => {
+        if (message.productId !== starterChat.productId) {
+          return false;
+        }
+
+        if (userId) {
+          return message.ownerId === starterChat.recipientId && message.participantId === userId;
+        }
+
+        if (!guestEmail) {
+          return false;
+        }
+
+        return (
+          message.ownerId === starterChat.recipientId &&
+          message.participantEmail === guestEmail.toLowerCase()
+        );
+      })
+    ) || null
+  );
+}
+
 export default async function ChatPage({
   searchParams
 }: {
@@ -37,9 +83,16 @@ export default async function ChatPage({
   const user = await getSessionUser();
   const params = await searchParams;
   const guestEmail = params?.email;
-  const messages = user
-    ? await getChatMessagesForUser(user.id)
-    : await getChatMessagesForGuest(guestEmail);
+
+  if (user) {
+    await markNotificationsRead(user.id, "chat");
+  }
+
+  const [messages, products, profiles] = await Promise.all([
+    user ? getChatMessagesForUser(user.id) : getChatMessagesForGuest(guestEmail),
+    getProducts(),
+    getUserPublicProfiles()
+  ]);
 
   const grouped = messages.reduce<Record<string, Message[]>>((acc, current) => {
     const message = current as Message;
@@ -52,143 +105,46 @@ export default async function ChatPage({
     [...thread].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   );
 
-  function avatarFor(message: Message) {
-    if (message.senderProfileImage) {
-      return (
-        <img
-          src={message.senderProfileImage}
-          alt={message.senderName}
-          className="avatar-image"
-        />
-      );
-    }
+  const product = params?.productId
+    ? products.find((entry) => entry.id === params.productId)
+    : null;
+  const ownerProfile = product
+    ? profiles.find((profile) => profile.id === product.ownerId)
+    : null;
 
-    return <span className="avatar-fallback">{message.senderName.slice(0, 1).toUpperCase()}</span>;
-  }
+  const starterChat =
+    product && product.ownerId !== user?.id
+      ? {
+          conversationId: `starter-${product.id}`,
+          recipientId: product.ownerId,
+          productId: product.id,
+          peerName: ownerProfile?.name || "Product owner",
+          peerEmail: ownerProfile?.email,
+          peerProfileImage: ownerProfile?.profileImage
+        }
+      : null;
+
+  const matchingThread = findMatchingThread(threads, starterChat, user?.id, guestEmail);
 
   return (
-    <div className="chat-layout">
-      {user ? (
-        <ChatForm
-          user={{ id: user.id, name: user.name, email: user.email }}
-          defaultProductId={params?.productId}
-          title="Start a direct conversation"
-        />
-      ) : (
-        <>
-          <ChatForm user={null} defaultProductId={params?.productId} />
-          <form className="stack-card" action="/chat">
-            <span className="eyebrow">Guest inbox</span>
-            <h2>Open your conversation</h2>
-            <label>
-              Your email
-              <input name="email" type="email" defaultValue={guestEmail || ""} required />
-            </label>
-            <button className="button" type="submit">
-              Load my messages
-            </button>
-          </form>
-        </>
-      )}
-
-      <section className="stack-card">
-        <span className="eyebrow">Inbox</span>
-        <h2>{user ? "Your conversations" : "Your guest conversations"}</h2>
-
-        {threads.length === 0 ? (
-          <p className="muted">No messages yet.</p>
-        ) : (
-          <div className="chat-thread">
-            {threads.map((thread) => {
-              const lastMessage = thread[thread.length - 1];
-              const ownerIsViewer = user?.id === lastMessage.ownerId;
-              const counterpartMessage =
-                thread.find((message) =>
-                  user
-                    ? message.senderId !== user.id
-                    : message.senderEmail !== guestEmail
-                ) || lastMessage;
-
-              return (
-                <article key={lastMessage.conversationId} className="stack-card conversation-card">
-                  <div className="chat-meta">
-                    <div className="chat-person">
-                      {avatarFor(counterpartMessage)}
-                      <strong>
-                        {ownerIsViewer
-                          ? counterpartMessage.participantEmail ||
-                            counterpartMessage.senderName
-                          : counterpartMessage.senderName}
-                      </strong>
-                    </div>
-                    <span>{lastMessage.productId || "General conversation"}</span>
-                  </div>
-
-                  <div className="chat-thread conversation-messages">
-                    {thread.map((message) => (
-                      <div
-                        key={message.id}
-                        className={
-                          user
-                            ? message.senderId === user.id
-                              ? "message-bubble mine"
-                              : "message-bubble"
-                            : message.senderEmail === guestEmail
-                              ? "message-bubble mine"
-                              : "message-bubble"
-                        }
-                      >
-                        <div className="message-header">
-                          <div className="chat-person">
-                            {avatarFor(message)}
-                            <strong>{message.senderName}</strong>
-                          </div>
-                        </div>
-                        <p>{message.message}</p>
-                        {message.location ? (
-                          <div className="location-card">
-                            <p>
-                              {message.location.label || "Live location"}:{" "}
-                              {message.location.latitude.toFixed(5)},{" "}
-                              {message.location.longitude.toFixed(5)}
-                            </p>
-                            <a
-                              href={`https://www.google.com/maps?q=${message.location.latitude},${message.location.longitude}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="location-link"
-                            >
-                              View live location
-                            </a>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-
-                  <ChatForm
-                    user={
-                      user
-                        ? { id: user.id, name: user.name, email: user.email }
-                        : null
-                    }
-                    conversationId={lastMessage.conversationId}
-                    defaultProductId={lastMessage.productId}
-                    recipientId={
-                      user && ownerIsViewer ? lastMessage.participantId : lastMessage.ownerId
-                    }
-                    participantEmail={lastMessage.participantEmail}
-                    guestEmail={!user ? guestEmail : undefined}
-                    guestName={!user ? thread[0].senderName : undefined}
-                    title="Reply in this conversation"
-                    submitLabel="Reply"
-                  />
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+    <div className="whatsapp-chat-container">
+      <ChatLayout
+        user={
+          user
+            ? {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                profileImage: user.profileImage
+              }
+            : null
+        }
+        threads={threads}
+        guestEmail={guestEmail}
+        defaultProductId={params?.productId}
+        starterChat={starterChat}
+        initialConversationId={matchingThread?.[0]?.conversationId}
+      />
     </div>
   );
 }

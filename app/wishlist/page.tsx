@@ -16,7 +16,7 @@ export default async function WishlistPage() {
   const user = await getSessionUser();
 
   if (!user) {
-    redirect("/login");
+    redirect("/auth");
   }
 
   const items = await getWishlistItems(user.id);

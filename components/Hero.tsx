@@ -12,7 +12,7 @@ export function Hero() {
           automatically.
         </p>
         <div className="hero-actions">
-          <Link href="/signup" className="button">
+          <Link href="/auth" className="button">
             Create account
           </Link>
           <Link href="/products" className="button button-secondary">

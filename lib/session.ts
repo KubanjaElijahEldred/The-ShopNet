@@ -13,6 +13,7 @@ export type SessionUser = {
   mobileNumber?: string;
   profileImage?: string;
   shippingAddress?: string;
+  role?: "customer" | "admin";
 };
 
 function getSecret() {
@@ -63,10 +64,14 @@ export async function getSessionUser() {
 
       return {
         id: clerkUser.id,
-        email: clerkUser.primaryEmailAddress?.emailAddress || clerkUser.emailAddresses[0]?.emailAddress || "",
+        email:
+          clerkUser.primaryEmailAddress?.emailAddress ||
+          clerkUser.emailAddresses[0]?.emailAddress ||
+          "",
         name: fullName || clerkUser.username || "ShopNet User",
         location: "Not set",
-        profileImage: clerkUser.imageUrl
+        profileImage: clerkUser.imageUrl,
+        role: "customer"
       } as SessionUser;
     }
   } catch {

@@ -7,6 +7,7 @@ type DemoUser = {
   mobileNumber?: string;
   profileImage?: string;
   shippingAddress?: string;
+  role: "customer" | "admin";
 };
 
 type DemoProduct = {
@@ -136,7 +137,8 @@ const initialStore = {
       location: "Kampala, Uganda",
       mobileNumber: "+256700000000",
       profileImage: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=150&h=150&q=80",
-      shippingAddress: "123 Demo Street, Kampala"
+      shippingAddress: "123 Demo Street, Kampala",
+      role: "customer"
     },
     {
       id: createId("usr"),
@@ -146,7 +148,8 @@ const initialStore = {
       location: "Nairobi, Kenya",
       mobileNumber: "+254700000000",
       profileImage: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80",
-      shippingAddress: "456 Test Avenue, Nairobi"
+      shippingAddress: "456 Test Avenue, Nairobi",
+      role: "customer"
     }
   ] as DemoUser[],
   products: [

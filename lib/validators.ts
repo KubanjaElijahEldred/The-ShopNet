@@ -3,6 +3,18 @@ import { z } from "zod";
 export const passwordRule =
   "Password must have at least 8 characters, one uppercase letter, one lowercase letter, one number, and one special character.";
 
+function isSupportedImageValue(value: string) {
+  return value.startsWith("http") || value.startsWith("data:image/");
+}
+
+const optionalImageSchema = z
+  .string()
+  .trim()
+  .optional()
+  .refine((value) => !value || isSupportedImageValue(value), {
+    message: "Profile image must be a valid image URL or uploaded image."
+  });
+
 export const signupSchema = z
   .object({
     name: z.string().min(2, "Name is required."),
@@ -12,7 +24,7 @@ export const signupSchema = z
       .trim()
       .optional()
       .or(z.literal("")),
-    profileImage: z.string().url("Profile image must be a valid URL.").optional().or(z.literal("")),
+    profileImage: optionalImageSchema,
     shippingAddress: z.string().optional().or(z.literal("")),
     password: z
       .string()
@@ -22,7 +34,9 @@ export const signupSchema = z
       .regex(/[0-9]/, passwordRule)
       .regex(/[^A-Za-z0-9]/, passwordRule),
     confirmPassword: z.string(),
-    location: z.string().min(2, "Location is required.")
+    location: z.string().min(2, "Location is required."),
+    role: z.enum(["customer", "admin"]).optional(),
+    adminPassword: z.string().optional().or(z.literal(""))
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Password confirmation does not match.",
@@ -42,19 +56,20 @@ export const productSchema = z.object({
   size: z.string().min(1, "Size is required."),
   rating: z.coerce.number().min(1).max(5),
   stock: z.coerce.number().int().min(1),
-  frontImage: z.string().url("Front image must be a valid URL."),
-  sideImage: z.string().url("Side image must be a valid URL."),
-  backImage: z.string().url("Back image must be a valid URL.")
+  frontImage: z.string().refine((val) => val.startsWith("http") || val.startsWith("data:image/"), { message: "Front image must be a valid URL or capture." }),
+  sideImage: z.string().refine((val) => val.startsWith("http") || val.startsWith("data:image/"), { message: "Side image must be a valid URL or capture." }),
+  backImage: z.string().refine((val) => val.startsWith("http") || val.startsWith("data:image/"), { message: "Back image must be a valid URL or capture." })
 });
 
 export const chatSchema = z.object({
   conversationId: z.string().optional(),
+  ownerId: z.string().optional(),
   recipientId: z.string().optional(),
   participantEmail: z.string().email("A valid email is required.").optional().or(z.literal("")),
   productId: z.string().optional(),
   guestName: z.string().optional(),
   guestEmail: z.string().email("A valid email is required.").optional().or(z.literal("")),
-  guestProfileImage: z.string().url("Profile image must be a valid URL.").optional().or(z.literal("")),
+  guestProfileImage: optionalImageSchema,
   message: z.string().min(1, "Message is required."),
   latitude: z.coerce.number().optional(),
   longitude: z.coerce.number().optional(),
@@ -66,10 +81,7 @@ export const profileSchema = z.object({
     .string()
     .trim()
     .min(7, "Mobile number is too short."),
-  profileImage: z
-    .string()
-    .url("Profile image must be a valid URL.")
-    .or(z.literal("")),
+  profileImage: optionalImageSchema,
   shippingAddress: z.string().optional().or(z.literal(""))
 });
 
