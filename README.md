@@ -37,5 +37,5 @@ JWT_SECRET=replace-this-with-a-long-random-secret
 npm run dev
 ```
 
-If `MONGODB_URI` is empty, ShopNet falls back to a temporary in-memory demo store so you can still explore the interface.
+If `MONGODB_URI` is empty, ShopNet falls back to a temporary in-memory demo store so you can still explore the interface
 # The-ShopNet
