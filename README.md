@@ -31,7 +31,7 @@ MONGODB_URI=your-mongodb-atlas-connection-string
 JWT_SECRET=replace-this-with-a-long-random-secret
 ```
 
-3. Start the development server:
+3. Start the development server
 
 ```bash
 npm run dev
